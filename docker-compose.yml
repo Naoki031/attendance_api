@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ./.docker/node_server/Dockerfile
+      target: server_development
+    container_name: api_attendance
+    command: npm run start:dev
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+    ports:
+      - '3001:3001'
+      - '9229:9229'
+    depends_on:
+      - mariadb
+    volumes:
+      - type: bind
+        source: .
+        target: /home/api_server
+      - /home/api_server/node_modules
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    networks:
+      - app-network
+
+  client:
+    build:
+      context: ../client
+      dockerfile: Dockerfile
+      target: client-development
+    container_name: client_attendance
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "3000:3000"
+      - "24678:24678"
+    volumes:
+      - type: bind
+        source: ../client
+        target: /home/client
+      - /home/client/node_modules
+    env_file:
+      - .env
+    networks:
+      - app-network
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ./.docker/nginx/Dockerfile
+    container_name: nginx-container
+    ports:
+      - "80:80"
+    depends_on:
+      - client
+    networks:
+      - app-network
+
+  mariadb:
+    build:
+      context: .
+      dockerfile: ./.docker/mariadb/Dockerfile
+    container_name: mariadb_attendance
+    ports:
+      - '3306:3306'
+    volumes:
+      - datastore:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: attendance
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      TZ: 'Asia/Ho_Chi_Minh'
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  datastore:

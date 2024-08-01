@@ -1,0 +1,41 @@
+{
+  "development": {
+    "username": "root",
+    "password": "password",
+    "database": "attendance",
+    "host": "mariadb",
+    "dialect": "mysql",
+    "define": {
+      "underscored": true,
+      "underscoredAll": true,
+      "createdAt": "created_at",
+      "updatedAt": "updated_at"
+    }
+  },
+  "test": {
+    "username": "root",
+    "password": null,
+    "database": "database_test",
+    "host": "mariadb",
+    "dialect": "mysql",
+    "define": {
+      "underscored": true,
+      "underscoredAll": true,
+      "createdAt": "created_at",
+      "updatedAt": "updated_at"
+    }
+  },
+  "production": {
+    "username": "root",
+    "password": null,
+    "database": "database_production",
+    "host": "mariadb",
+    "dialect": "mysql",
+    "define": {
+      "underscored": true,
+      "underscoredAll": true,
+      "createdAt": "created_at",
+      "updatedAt": "updated_at"
+    }
+  }
+}

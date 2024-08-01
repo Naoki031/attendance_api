@@ -1,0 +1,17 @@
+node_modules
+dist
+.npm
+.git*
+.env*
+*.log
+README.md
+.github
+.ci
+.prettierrc
+.styleci.yml
+.vscode/
+dist/
+obj/
+Makefile
+docker-compose*
+Dockerfile
