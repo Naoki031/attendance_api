@@ -11,6 +11,10 @@ import { PermissionsModule } from './modules/permissions/permissions.module';
 import { UsersModule } from './modules/users/users.module';
 import { PermissionGroupsModule } from './modules/permission_groups/permission_groups.module';
 import { UserGroupPermissionsModule } from './modules/user_group_permissions/user_group_permissions.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtGuard } from '@/modules/auth/guards/jwt.guard';
 
 @Module({
   imports: [
@@ -18,11 +22,11 @@ import { UserGroupPermissionsModule } from './modules/user_group_permissions/use
     DatabaseModule,
     CountriesModule,
     RolesModule,
-    PermissionModule,
     PermissionsModule,
     UsersModule,
     PermissionGroupsModule,
     UserGroupPermissionsModule,
+    AuthModule,
     // RolesModule,
     // AuthModule,
     // UsersModule,
@@ -31,7 +35,13 @@ import { UserGroupPermissionsModule } from './modules/user_group_permissions/use
     // CompaniesModule,
     // EmployeesModule,
   ],
-  // providers: [AuthService],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtGuard,
+    },
+    JwtStrategy,
+  ],
   // controllers: [AppController],
   // providers: [AppService],
 })

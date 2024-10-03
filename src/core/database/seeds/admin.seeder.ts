@@ -19,7 +19,7 @@ export default class AdminSeeder implements Seeder {
         phone_number: '0909090909',
         email: 'trucnguyen.dofuu@gmail.com',
         address: 'HCMC',
-        password: await hash('admin', 10),
+        password: await hash('admin123', 10),
         is_activated: true,
         roles: '["super_admin", "user"]',
         created_at: new Date(),

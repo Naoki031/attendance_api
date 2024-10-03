@@ -49,6 +49,6 @@ export class CountriesController {
 
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
-    return this.countriesService.delete(id);
+    return this.countriesService.remove(id);
   }
 }
