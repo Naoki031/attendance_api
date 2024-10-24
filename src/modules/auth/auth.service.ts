@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '@/modules/users/users.service';
@@ -17,7 +21,7 @@ export class AuthService {
    * @param {string} email - The email address of the user to validate.
    * @param {string} password - The password of the user to validate.
    * @returns A promise that resolves to the user object if validation is successful.
-   * @throws {BadRequestException} If the user is not found or the password does not match.
+   * @throws {BadRequestException|UnprocessableEntityException} If the user is not found or the password does not match.
    */
   async validateUser(email: string, password: string): Promise<any> {
     const user = await this.usersService.findOneByEmail(email);
@@ -29,7 +33,7 @@ export class AuthService {
     const isMatch: boolean = bcrypt.compareSync(password, user.password);
 
     if (!isMatch) {
-      throw new BadRequestException('Password does not match');
+      throw new UnprocessableEntityException('Password does not match');
     }
 
     return user;
