@@ -3,6 +3,10 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
+  BeforeInsert,
+  BeforeUpdate,
+  AfterLoad,
 } from 'typeorm';
 
 @Entity({ name: 'permission_groups' })
@@ -13,16 +17,16 @@ export class PermissionGroup {
   @Column({
     nullable: false,
     unique: true,
-    name: 'name'
+    name: 'name',
   })
   name!: string;
 
   @Column({
+    type: 'text', // Đảm bảo lưu JSON dưới dạng chuỗi
     nullable: false,
-    unique: true,
-    name: 'permissions'
+    name: 'permissions',
   })
-  permissions!: string;
+  permissions!: string | string[];
 
   @Column({
     nullable: true,
@@ -31,20 +35,39 @@ export class PermissionGroup {
   descriptions?: string;
 
   @CreateDateColumn({
-    nullable: true,
     name: 'created_at',
   })
   created_at?: Date;
 
-  @CreateDateColumn({
-    nullable: true,
+  @UpdateDateColumn({
     name: 'updated_at',
   })
   updated_at?: Date;
 
   @Column({
+    type: 'timestamp',
     nullable: true,
     name: 'deleted_at',
   })
   deleted_at?: Date;
+
+  @BeforeInsert()
+  @BeforeUpdate()
+  convertPermissionsToString() {
+    if (Array.isArray(this.permissions)) {
+      this.permissions = JSON.stringify(this.permissions);
+    }
+  }
+
+  @AfterLoad()
+  parsePermissions() {
+    if (typeof this.permissions === 'string') {
+      try {
+        this.permissions = JSON.parse(this.permissions);
+      } catch (error) {
+        console.error('Failed to parse permissions:', error);
+        throw error;
+      }
+    }
+  }
 }

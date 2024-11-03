@@ -1,15 +1,34 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Put,
+  Param,
+  Delete,
+  ParseIntPipe,
+  ValidationPipe,
+} from '@nestjs/common';
 import { PermissionGroupsService } from './permission_groups.service';
 import { CreatePermissionGroupDto } from './dto/create-permission_group.dto';
 import { UpdatePermissionGroupDto } from './dto/update-permission_group.dto';
 
 @Controller('permission-groups')
 export class PermissionGroupsController {
-  constructor(private readonly permissionGroupsService: PermissionGroupsService) {}
+  constructor(
+    private readonly permissionGroupsService: PermissionGroupsService,
+  ) {}
 
   @Post()
-  create(@Body() createPermissionGroupDto: CreatePermissionGroupDto) {
-    return this.permissionGroupsService.create(createPermissionGroupDto);
+  create(
+    @Body(ValidationPipe) createPermissionGroupDto: CreatePermissionGroupDto,
+  ) {
+    try {
+      return this.permissionGroupsService.create(createPermissionGroupDto);
+    } catch (error) {
+      console.log('Error creating permission group:', error);
+      throw error;
+    }
   }
 
   @Get()
@@ -18,17 +37,25 @@ export class PermissionGroupsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.permissionGroupsService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.permissionGroupsService.findOne(id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updatePermissionGroupDto: UpdatePermissionGroupDto) {
-    return this.permissionGroupsService.update(+id, updatePermissionGroupDto);
+  @Put(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body(ValidationPipe) updatePermissionGroupDto: UpdatePermissionGroupDto,
+  ) {
+    try {
+      return this.permissionGroupsService.update(id, updatePermissionGroupDto);
+    } catch (error) {
+      console.log('Error updating permission group:', error);
+      throw error;
+    }
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.permissionGroupsService.remove(+id);
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.permissionGroupsService.remove(id);
   }
 }
