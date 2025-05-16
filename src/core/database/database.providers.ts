@@ -5,6 +5,7 @@ import { databaseConfig } from './database.config';
 import { Country } from '../../modules/countries/entities/country.entity';
 import { Role } from '../../modules/roles/entities/role.entity';
 import { Permission } from '../../modules/permissions/entities/permission.entity';
+import { PermissionGroup } from '@/modules/permission_groups/entities/permission_group.entity';
 import { User } from '../../modules/users/entities/user.entity';
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
@@ -15,7 +16,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
 
     return {
       ...config,
-      entities: [Country, Role, Permission, User],
+      entities: [Country, Role, Permission, PermissionGroup, User],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),
       propertyNamingStrategy: 'snake_case',
