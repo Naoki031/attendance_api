@@ -12,19 +12,19 @@ export default class PermissionGroupSeeder implements Seeder {
     await repository.insert([
       {
         name: 'Super',
-        permissions: '[all_privileges]',
+        permissions: JSON.stringify(['all_privileges']),
         created_at: new Date(),
         updated_at: new Date(),
       },
       {
         name: 'Admin',
-        permissions: '[create, update, delete]',
+        permissions: JSON.stringify(['create', 'update', 'delete']),
         created_at: new Date(),
         updated_at: new Date(),
       },
       {
         name: 'User',
-        permissions: '[create, update]',
+        permissions: JSON.stringify(['create', 'update']),
         created_at: new Date(),
         updated_at: new Date(),
       },
