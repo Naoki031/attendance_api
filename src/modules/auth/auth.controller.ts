@@ -27,6 +27,11 @@ export class AuthController {
     return accessToken;
   }
 
+  @Post('logout')
+  logout(@Request() request) {
+    return 'Logged out successfully';
+  }
+
   @Get('user')
   getProfile(@User() user) {
     return user;
