@@ -7,7 +7,9 @@ import {
   BeforeInsert,
   BeforeUpdate,
   AfterLoad,
+  OneToMany,
 } from 'typeorm';
+import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity';
 
 @Entity({ name: 'permission_groups' })
 export class PermissionGroup {
@@ -50,6 +52,9 @@ export class PermissionGroup {
     name: 'deleted_at',
   })
   deleted_at?: Date;
+
+  @OneToMany(() => UserGroupPermission, (userGroupPermission) => userGroupPermission.permission_group)
+  user_group_permissions: UserGroupPermission[];
 
   @BeforeInsert()
   @BeforeUpdate()

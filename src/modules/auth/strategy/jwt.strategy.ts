@@ -20,7 +20,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * @returns An object containing the user ID and email extracted from the payload.
    */
   async validate(payload: any) {
-    console.log('jwt payload', payload);
-    return { user_id: payload.user_id, email: payload.email };
+    return { id: payload.user_id, email: payload.email };
   }
 }

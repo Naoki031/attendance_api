@@ -45,13 +45,12 @@ export class JwtGuard extends AuthGuard('jwt') {
     try {
       const secret = this.configService.get<string>('JWT_KEY');
       const payload = await this.jwtService.verifyAsync(token, { secret });
+
       request['user'] = payload;
     } catch (error) {
       if (error instanceof TokenExpiredError) {
-        console.error('Token expired:', error.expiredAt);
         throw new UnauthorizedException('Token expired');
       } else {
-        console.error('Error verifying token:', error);
         throw new UnauthorizedException('Invalid token');
       }
     }
