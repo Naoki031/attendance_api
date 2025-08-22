@@ -2,7 +2,6 @@ import * as dotenv from 'dotenv';
 import { DBConfig } from './interfaces/db-config.interface';
 
 dotenv.config();
-console.log('process.env.NODE_ENV', process.env.DB_HOST);
 export const databaseConfig: DBConfig = {
   development: {
     type: (process.env.DB_DIALECT as any) || 'mysql',

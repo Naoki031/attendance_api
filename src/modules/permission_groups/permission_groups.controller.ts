@@ -8,12 +8,16 @@ import {
   Delete,
   ParseIntPipe,
   ValidationPipe,
+  UseGuards,
 } from '@nestjs/common';
 import { PermissionGroupsService } from './permission_groups.service';
 import { CreatePermissionGroupDto } from './dto/create-permission_group.dto';
 import { UpdatePermissionGroupDto } from './dto/update-permission_group.dto';
+import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard';
+import { Permissions } from '@/modules/permissions/decorators/permissions.decorator';
 
 @Controller('permission-groups')
+@UseGuards(PermissionsGuard)
 export class PermissionGroupsController {
   constructor(
     private readonly permissionGroupsService: PermissionGroupsService,
@@ -32,16 +36,19 @@ export class PermissionGroupsController {
   }
 
   @Get()
+  @Permissions('all_privileges', 'read')
   findAll() {
     return this.permissionGroupsService.findAll();
   }
 
+  @Permissions('all_privileges', 'read')
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.permissionGroupsService.findOne(id);
   }
 
   @Put(':id')
+  @Permissions('update')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body(ValidationPipe) updatePermissionGroupDto: UpdatePermissionGroupDto,
@@ -55,6 +62,7 @@ export class PermissionGroupsController {
   }
 
   @Delete(':id')
+  @Permissions('delete')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.permissionGroupsService.remove(id);
   }

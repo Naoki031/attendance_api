@@ -4,7 +4,6 @@ import { UpdatePermissionGroupDto } from './dto/update-permission_group.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PermissionGroup } from './entities/permission_group.entity';
-import { json } from 'stream/consumers';
 
 @Injectable()
 export class PermissionGroupsService {

@@ -29,7 +29,6 @@ export class AuthController {
 
   @Get('user')
   getProfile(@User() user) {
-    console.log('user', user);
     return user;
   }
 }
