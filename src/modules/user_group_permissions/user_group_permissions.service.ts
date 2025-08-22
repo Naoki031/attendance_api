@@ -1,26 +1,46 @@
 import { Injectable } from '@nestjs/common';
 import { CreateUserGroupPermissionDto } from './dto/create-user_group_permission.dto';
 import { UpdateUserGroupPermissionDto } from './dto/update-user_group_permission.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { UserGroupPermission } from './entities/user_group_permission.entity';
 
 @Injectable()
 export class UserGroupPermissionsService {
-  create(createUserGroupPermissionDto: CreateUserGroupPermissionDto) {
-    return 'This action adds a new userGroupPermission';
+  constructor(
+    @InjectRepository(UserGroupPermission)
+    private readonly userGroupPermissionRepository: Repository<UserGroupPermission>,
+  ) { }
+
+  async create(createUserGroupPermissionDto: CreateUserGroupPermissionDto) {
+    const userGroupPermission = this.userGroupPermissionRepository.create(createUserGroupPermissionDto);
+    return await this.userGroupPermissionRepository.save(userGroupPermission);
   }
 
-  findAll() {
-    return `This action returns all userGroupPermissions`;
+  async findAll() {
+    return await this.userGroupPermissionRepository.find();
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} userGroupPermission`;
+  async findOne(id: number) {
+    return await this.userGroupPermissionRepository.findOneBy({ id });
   }
 
-  update(id: number, updateUserGroupPermissionDto: UpdateUserGroupPermissionDto) {
-    return `This action updates a #${id} userGroupPermission`;
+  async update(id: number, updateUserGroupPermissionDto: UpdateUserGroupPermissionDto) {
+    await this.userGroupPermissionRepository.update(id, updateUserGroupPermissionDto);
+    return this.findOne(id);
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} userGroupPermission`;
+  async remove(id: number) {
+    await this.userGroupPermissionRepository.delete(id);
+    return true;
+  }
+
+  async getUserPermissions(userId: number): Promise<UserGroupPermission[]> {
+    const userGroupPermissions = await this.userGroupPermissionRepository.find({
+      where: { user_id: userId },
+      relations: ['permission_group'],
+    });
+
+    return userGroupPermissions;
   }
 }

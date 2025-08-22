@@ -3,7 +3,11 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  JoinColumn,
+  ManyToOne,
 } from 'typeorm';
+import { User } from '@/modules/users/entities/user.entity';
+import { PermissionGroup } from '@/modules/permission_groups/entities/permission_group.entity';
 
 @Entity({ name: 'user_group_permissions' })
 export class UserGroupPermission {
@@ -33,4 +37,12 @@ export class UserGroupPermission {
     name: 'updated_at',
   })
   updated_at?: Date;
+
+  @ManyToOne(() => User, (user) => user.user_group_permissions, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'user_id' })
+  user: User;
+
+  @ManyToOne(() => PermissionGroup, (group) => group.user_group_permissions, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'permission_group_id' })
+  permission_group: PermissionGroup;
 }

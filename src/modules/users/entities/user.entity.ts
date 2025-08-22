@@ -3,7 +3,9 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  OneToMany,
 } from 'typeorm';
+import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity';
 
 @Entity({ name: 'users' })
 export class User {
@@ -131,4 +133,7 @@ export class User {
     name: 'deleted_at',
   })
   deleted_at?: Date;
+
+  @OneToMany(() => UserGroupPermission, (userGroupPermission) => userGroupPermission.user)
+  user_group_permissions?: UserGroupPermission[];
 }
