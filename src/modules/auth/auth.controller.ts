@@ -1,5 +1,4 @@
 import {
-  Body,
   Controller,
   Get,
   HttpCode,
@@ -28,12 +27,12 @@ export class AuthController {
   }
 
   @Post('logout')
-  logout(@Request() request) {
+  logout() {
     return 'Logged out successfully';
   }
 
   @Get('user')
   getProfile(@User() user) {
-    return user;
+    return this.authService.getProfile(user.id);
   }
 }

@@ -43,7 +43,19 @@ export class UsersService {
    * @throws NotFoundException if no user is found with the given email address.
    */
   async findOneByEmail(email: string): Promise<User | undefined> {
-    const user = await this.userRepository.findOne({ where: { email } });
+    const user = await this.userRepository.findOne({
+      where: { email },
+      relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
+    });
+
+    return user;
+  }
+
+  async findOneWithPermissions(id: number): Promise<User | undefined> {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
+    });
 
     return user;
   }

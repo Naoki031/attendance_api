@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   UnprocessableEntityException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -49,5 +50,17 @@ export class AuthService {
     const payload = { email: user.email, id: user.id, roles: user.roles };
 
     return { access_token: this.jwtService.sign(payload) };
+  }
+
+  async getProfile(id: number): Promise<Omit<User, 'password'>> {
+    const user = await this.usersService.findOneWithPermissions(id);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const { password, ...profile } = user as User & { password: string };
+
+    return profile;
   }
 }
