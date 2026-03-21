@@ -12,6 +12,8 @@ import { UsersModule } from './modules/users/users.module'
 import { PermissionGroupsModule } from './modules/permission_groups/permission_groups.module'
 import { UserGroupPermissionsModule } from './modules/user_group_permissions/user_group_permissions.module'
 import { AuthModule } from './modules/auth/auth.module'
+import { CitiesModule } from './modules/cities/cities.module'
+import { CompaniesModule } from './modules/companies/companies.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
 import { APP_GUARD } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
@@ -27,9 +29,9 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
     PermissionGroupsModule,
     UserGroupPermissionsModule,
     AuthModule,
+    CitiesModule,
+    CompaniesModule,
     // GroupsModule,
-    // CitiesModule,
-    // CompaniesModule,
     // EmployeesModule,
   ],
   providers: [
