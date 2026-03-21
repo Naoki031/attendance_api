@@ -47,7 +47,10 @@ export class PermissionsController {
 
   @Put(':id')
   @Permissions('update')
-  update(@Param('id', ParseIntPipe) permissionId: number, @Body() updatePermissionDto: UpdatePermissionDto) {
+  update(
+    @Param('id', ParseIntPipe) permissionId: number,
+    @Body() updatePermissionDto: UpdatePermissionDto,
+  ) {
     try {
       return this.permissionsService.update(permissionId, updatePermissionDto)
     } catch (error) {

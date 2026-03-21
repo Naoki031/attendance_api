@@ -1,147 +1,144 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  OneToMany,
-} from 'typeorm';
-import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity';
-import { Expose } from 'class-transformer';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm'
+import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
+import { Exclude, Expose } from 'class-transformer'
 
 @Entity({ name: 'users' })
 export class User {
   @PrimaryGeneratedColumn()
-  id!: number;
+  id!: number
 
   @Column({
     nullable: false,
     unique: true,
     name: 'username',
   })
-  username!: string;
+  username!: string
 
   @Column({
     nullable: false,
     name: 'first_name',
   })
-  first_name!: string;
+  first_name!: string
 
   @Column({
     nullable: false,
     name: 'last_name',
   })
-  last_name!: string;
+  last_name!: string
 
   @Column({
     nullable: true,
     name: 'position',
   })
-  position?: string;
+  position?: string
 
   @Column({
     nullable: true,
     name: 'phone_number',
   })
-  phone_number?: string;
+  phone_number?: string
 
   @Column({
     nullable: false,
     unique: true,
     name: 'email',
   })
-  email?: string;
+  email?: string
 
   @Column({
     nullable: true,
     name: 'address',
   })
-  address?: string;
+  address?: string
 
+  @Exclude()
   @Column({
     nullable: false,
     name: 'password',
   })
-  password!: string;
+  password!: string
 
   @Column({
     nullable: false,
     name: 'is_activated',
   })
-  is_activated!: boolean;
+  is_activated!: boolean
 
   @Column({
     nullable: true,
     name: 'avatar',
   })
-  avatar?: string;
+  avatar?: string
 
   @Column({
     nullable: true,
     name: 'date_of_birth',
   })
-  date_of_birth?: string;
+  date_of_birth?: string
 
   @Column({
     nullable: true,
     name: 'join_date',
   })
-  join_date?: string;
+  join_date?: string
 
   @Column({
     nullable: true,
     name: 'contract_signed_date',
   })
-  contract_signed_date?: string;
+  contract_signed_date?: string
 
   @Column({
     nullable: true,
     name: 'contract_expired_date',
   })
-  contract_expired_date?: string;
+  contract_expired_date?: string
 
   @Column({
     nullable: true,
     name: 'contract_type',
   })
-  contract_type?: string;
+  contract_type?: string
 
   @Column({
     nullable: true,
     name: 'contract_count',
   })
-  contract_count?: number;
+  contract_count?: number
 
   @CreateDateColumn({
     nullable: true,
     name: 'created_at',
   })
-  created_at?: Date;
+  created_at?: Date
 
   @CreateDateColumn({
     nullable: true,
     name: 'updated_at',
   })
-  updated_at?: Date;
+  updated_at?: Date
 
+  @Exclude()
   @CreateDateColumn({
     nullable: true,
     name: 'deleted_at',
   })
-  deleted_at?: Date;
+  deleted_at?: Date
 
+  @Exclude()
   @OneToMany(() => UserGroupPermission, (userGroupPermission) => userGroupPermission.user)
-  user_group_permissions?: UserGroupPermission[];
+  user_group_permissions?: UserGroupPermission[]
 
   @Expose()
   get full_name(): string {
-    return `${this.first_name} ${this.last_name}`;
+    return `${this.first_name} ${this.last_name}`
   }
 
   @Expose()
   get roles(): string[] {
-    if (!this.user_group_permissions) return [];
+    if (!this.user_group_permissions) return []
     return this.user_group_permissions
-      .map((ugp) => ugp.permission_group?.name)
-      .filter((name) => !!name);
+      .map((userGroupPermission) => userGroupPermission.permission_group?.name)
+      .filter((name): name is string => !!name)
   }
 }
