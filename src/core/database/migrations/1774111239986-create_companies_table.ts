@@ -1,6 +1,6 @@
-import { MigrationInterface, QueryRunner, Table, TableForeignKey } from 'typeorm'
+import { MigrationInterface, QueryRunner, Table } from 'typeorm'
 
-export class CreateCompaniesTable1727623424196 implements MigrationInterface {
+export class CreateCompaniesTable1774111239986 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.createTable(
       new Table({
@@ -15,20 +15,11 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
             isNullable: false,
           },
           {
-            name: 'country_id',
-            type: 'int',
-            isNullable: true,
-          },
-          {
-            name: 'city_id',
-            type: 'int',
-            isNullable: true,
-          },
-          {
             name: 'name',
             type: 'varchar',
             length: '100',
             isNullable: false,
+            isUnique: true,
           },
           {
             name: 'slug',
@@ -39,13 +30,13 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
           {
             name: 'address',
             type: 'varchar',
-            length: '100',
+            length: '255',
             isNullable: true,
           },
           {
-            name: 'phone_number',
+            name: 'phone',
             type: 'varchar',
-            length: '20',
+            length: '30',
             isNullable: true,
           },
           {
@@ -57,32 +48,26 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
           {
             name: 'website',
             type: 'varchar',
-            length: '100',
+            length: '255',
             isNullable: true,
           },
           {
-            name: 'descriptions',
+            name: 'logo',
             type: 'varchar',
-            length: '100',
-            isNullable: true,
-          },
-          {
-            name: 'founded_date',
-            type: 'date',
+            length: '255',
             isNullable: true,
           },
           {
             name: 'created_at',
             type: 'timestamp',
             default: 'CURRENT_TIMESTAMP',
-            isNullable: false,
+            isNullable: true,
           },
           {
             name: 'updated_at',
             type: 'timestamp',
             default: 'CURRENT_TIMESTAMP',
-            onUpdate: 'CURRENT_TIMESTAMP',
-            isNullable: false,
+            isNullable: true,
           },
           {
             name: 'deleted_at',
@@ -92,28 +77,6 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
         ],
       }),
       true,
-    )
-
-    // Create foreign key for country_id
-    await queryRunner.createForeignKey(
-      'companies',
-      new TableForeignKey({
-        columnNames: ['country_id'],
-        referencedColumnNames: ['id'],
-        referencedTableName: 'countries',
-        onDelete: 'SET NULL',
-      }),
-    )
-
-    // Create foreign key for city_id
-    await queryRunner.createForeignKey(
-      'companies',
-      new TableForeignKey({
-        columnNames: ['city_id'],
-        referencedColumnNames: ['id'],
-        referencedTableName: 'cities',
-        onDelete: 'SET NULL',
-      }),
     )
   }
 
