@@ -64,6 +64,88 @@ export class UsersService {
   }
 
   /**
+   * Filters users by multiple optional criteria.
+   * Uses subqueries for department and role to avoid corrupting loaded relations.
+   *
+   * @param params - Filter parameters: userId, name, position, email, departmentId, role, status, contractType.
+   * @returns A promise that resolves to matching users with full relations.
+   */
+  async findWithFilters(parameters: {
+    userId?: number
+    name?: string
+    position?: string
+    email?: string
+    departmentId?: number
+    role?: string
+    status?: string
+    contractType?: string
+  }): Promise<User[]> {
+    const queryBuilder = this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.user_group_permissions', 'userGroupPermission')
+      .leftJoinAndSelect('userGroupPermission.permission_group', 'permissionGroup')
+      .leftJoinAndSelect('user.user_departments', 'userDepartment')
+      .leftJoinAndSelect('userDepartment.department', 'department')
+      .leftJoinAndSelect('userDepartment.company', 'company')
+
+    if (parameters.userId) {
+      queryBuilder.andWhere('user.id = :userId', { userId: parameters.userId })
+    }
+
+    if (parameters.name) {
+      const nameLike = `%${parameters.name.toLowerCase()}%`
+      queryBuilder.andWhere(
+        "(LOWER(user.first_name) LIKE :nameLike OR LOWER(user.last_name) LIKE :nameLike OR LOWER(CONCAT(user.first_name, ' ', user.last_name)) LIKE :nameLike)",
+        { nameLike },
+      )
+    }
+
+    if (parameters.position) {
+      queryBuilder.andWhere('LOWER(user.position) LIKE :position', {
+        position: `%${parameters.position.toLowerCase()}%`,
+      })
+    }
+
+    if (parameters.email) {
+      queryBuilder.andWhere('LOWER(user.email) LIKE :email', {
+        email: `%${parameters.email.toLowerCase()}%`,
+      })
+    }
+
+    if (parameters.departmentId) {
+      queryBuilder.andWhere(
+        'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.department_id = :departmentId)',
+        { departmentId: parameters.departmentId },
+      )
+    }
+
+    if (parameters.role) {
+      queryBuilder.andWhere(
+        `user.id IN (
+          SELECT ugp.user_id FROM user_group_permissions ugp
+          INNER JOIN permission_groups pg ON ugp.permission_group_id = pg.id
+          WHERE LOWER(pg.name) = :roleName
+        )`,
+        { roleName: parameters.role.toLowerCase() },
+      )
+    }
+
+    if (parameters.status === 'active') {
+      queryBuilder.andWhere('user.is_activated = :isActivated', { isActivated: true })
+    } else if (parameters.status === 'inactive') {
+      queryBuilder.andWhere('user.is_activated = :isActivated', { isActivated: false })
+    }
+
+    if (parameters.contractType) {
+      queryBuilder.andWhere('LOWER(user.contract_type) LIKE :contractType', {
+        contractType: `%${parameters.contractType.toLowerCase()}%`,
+      })
+    }
+
+    return queryBuilder.getMany()
+  }
+
+  /**
    * Searches users by first name, last name, or email using a case-insensitive partial match.
    * Returns at most `limit` results to avoid loading the full table.
    *

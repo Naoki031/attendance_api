@@ -25,9 +25,35 @@ export class UsersController {
   }
 
   @Get()
-  findAll(@Query('search') search?: string) {
+  findAll(
+    @Query('search') search?: string,
+    @Query('id') userId?: string,
+    @Query('name') name?: string,
+    @Query('position') position?: string,
+    @Query('email') email?: string,
+    @Query('department_id') departmentId?: string,
+    @Query('role') role?: string,
+    @Query('status') status?: string,
+    @Query('contract_type') contractType?: string,
+  ) {
     if (search) {
       return this.usersService.search(search)
+    }
+
+    const hasFilter =
+      userId || name || position || email || departmentId || role || status || contractType
+
+    if (hasFilter) {
+      return this.usersService.findWithFilters({
+        userId: userId ? parseInt(userId, 10) : undefined,
+        name,
+        position,
+        email,
+        departmentId: departmentId ? parseInt(departmentId, 10) : undefined,
+        role,
+        status,
+        contractType,
+      })
     }
 
     return this.usersService.findAll()
