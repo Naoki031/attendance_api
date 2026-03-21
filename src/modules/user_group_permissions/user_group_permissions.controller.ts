@@ -27,7 +27,10 @@ export class UserGroupPermissionsController {
     @Param('id') userGroupPermissionId: string,
     @Body() updateUserGroupPermissionDto: UpdateUserGroupPermissionDto,
   ) {
-    return this.userGroupPermissionsService.update(+userGroupPermissionId, updateUserGroupPermissionDto)
+    return this.userGroupPermissionsService.update(
+      +userGroupPermissionId,
+      updateUserGroupPermissionDto,
+    )
   }
 
   @Delete(':id')

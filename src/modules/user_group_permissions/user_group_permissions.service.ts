@@ -27,8 +27,14 @@ export class UserGroupPermissionsService {
     return await this.userGroupPermissionRepository.findOneBy({ id: userGroupPermissionId })
   }
 
-  async update(userGroupPermissionId: number, updateUserGroupPermissionDto: UpdateUserGroupPermissionDto) {
-    await this.userGroupPermissionRepository.update(userGroupPermissionId, updateUserGroupPermissionDto)
+  async update(
+    userGroupPermissionId: number,
+    updateUserGroupPermissionDto: UpdateUserGroupPermissionDto,
+  ) {
+    await this.userGroupPermissionRepository.update(
+      userGroupPermissionId,
+      updateUserGroupPermissionDto,
+    )
     return this.findOne(userGroupPermissionId)
   }
 
