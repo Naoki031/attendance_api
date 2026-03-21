@@ -2,6 +2,8 @@ import { DataSource, DataSourceOptions } from 'typeorm'
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies'
 import { SeederOptions } from 'typeorm-extension'
 import { Country } from '../../modules/countries/entities/country.entity'
+import { City } from '../../modules/cities/entities/city.entity'
+import { Company } from '../../modules/companies/entities/company.entity'
 import { Role } from '../../modules/roles/entities/role.entity'
 import { Permission } from '../../modules/permissions/entities/permission.entity'
 import { User } from '../../modules/users/entities/user.entity'
@@ -14,7 +16,7 @@ const config = databaseConfig[process.env.NODE_ENV]
 
 const options: DataSourceOptions & SeederOptions = {
   ...config,
-  entities: [Country, Role, Permission, User, PermissionGroup, UserGroupPermission],
+  entities: [Country, City, Company, Role, Permission, User, PermissionGroup, UserGroupPermission],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',
   seeds: [InitSeeder],

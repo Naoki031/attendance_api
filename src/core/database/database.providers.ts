@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies'
 import { databaseConfig } from './database.config'
 import { Country } from '@/modules/countries/entities/country.entity'
+import { City } from '@/modules/cities/entities/city.entity'
+import { Company } from '@/modules/companies/entities/company.entity'
 import { Role } from '@/modules/roles/entities/role.entity'
 import { Permission } from '@/modules/permissions/entities/permission.entity'
 import { PermissionGroup } from '@/modules/permission_groups/entities/permission_group.entity'
@@ -17,7 +19,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
 
     return {
       ...config,
-      entities: [Country, Role, Permission, PermissionGroup, User, UserGroupPermission],
+      entities: [Country, City, Company, Role, Permission, PermissionGroup, User, UserGroupPermission],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),
       propertyNamingStrategy: 'snake_case',
