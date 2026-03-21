@@ -19,7 +19,16 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
 
     return {
       ...config,
-      entities: [Country, City, Company, Role, Permission, PermissionGroup, User, UserGroupPermission],
+      entities: [
+        Country,
+        City,
+        Company,
+        Role,
+        Permission,
+        PermissionGroup,
+        User,
+        UserGroupPermission,
+      ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),
       propertyNamingStrategy: 'snake_case',

@@ -27,6 +27,7 @@ export class CompaniesService {
       if (duplicate.name === createCompanyDto.name) {
         throw new ConflictException('Company name already exists')
       }
+
       throw new ConflictException('Company slug already exists')
     }
 
