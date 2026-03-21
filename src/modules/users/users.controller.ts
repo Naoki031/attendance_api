@@ -6,6 +6,7 @@ import {
   Put,
   Param,
   Delete,
+  Query,
   ClassSerializerInterceptor,
   UseInterceptors,
 } from '@nestjs/common'
@@ -24,7 +25,11 @@ export class UsersController {
   }
 
   @Get()
-  findAll() {
+  findAll(@Query('search') search?: string) {
+    if (search) {
+      return this.usersService.search(search)
+    }
+
     return this.usersService.findAll()
   }
 
