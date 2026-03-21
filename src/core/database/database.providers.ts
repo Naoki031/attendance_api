@@ -10,6 +10,7 @@ import { Permission } from '@/modules/permissions/entities/permission.entity'
 import { PermissionGroup } from '@/modules/permission_groups/entities/permission_group.entity'
 import { User } from '@/modules/users/entities/user.entity'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
+import { Department } from '@/modules/departments/entities/department.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -28,6 +29,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         PermissionGroup,
         User,
         UserGroupPermission,
+        Department,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),
