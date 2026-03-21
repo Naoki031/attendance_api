@@ -9,12 +9,12 @@ import {
   ParseIntPipe,
   ValidationPipe,
   UseGuards,
-} from '@nestjs/common';
-import { CountriesService } from './countries.service';
-import { CreateCountryDto } from './dto/create-country.dto';
-import { UpdateCountryDto } from './dto/update-country.dto';
-import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard';
-import { Permissions } from '@/modules/permissions/decorators/permissions.decorator';
+} from '@nestjs/common'
+import { CountriesService } from './countries.service'
+import { CreateCountryDto } from './dto/create-country.dto'
+import { UpdateCountryDto } from './dto/update-country.dto'
+import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
+import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
 
 @Controller('countries')
 @UseGuards(PermissionsGuard)
@@ -25,38 +25,38 @@ export class CountriesController {
   @Permissions('create')
   async create(@Body(ValidationPipe) createCountryDto: CreateCountryDto) {
     try {
-      return await this.countriesService.create(createCountryDto);
+      return await this.countriesService.create(createCountryDto)
     } catch (error) {
-      console.error('Error creating country:', error);
+      console.error('Error creating country:', error)
 
-      throw error;
+      throw error
     }
   }
 
   @Get()
   @Permissions('read')
   findAll() {
-    return this.countriesService.findAll();
+    return this.countriesService.findAll()
   }
 
   @Get(':id')
   @Permissions('read')
-  findOne(@Param('id', ParseIntPipe) id: string) {
-    return this.countriesService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) countryId: string) {
+    return this.countriesService.findOne(+countryId)
   }
 
   @Put(':id')
   @Permissions('update')
   update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseIntPipe) countryId: number,
     @Body(ValidationPipe) updateCountryDto: UpdateCountryDto,
   ) {
-    return this.countriesService.update(id, updateCountryDto);
+    return this.countriesService.update(countryId, updateCountryDto)
   }
 
   @Delete(':id')
   @Permissions('delete')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.countriesService.remove(id);
+  remove(@Param('id', ParseIntPipe) countryId: number) {
+    return this.countriesService.remove(countryId)
   }
 }

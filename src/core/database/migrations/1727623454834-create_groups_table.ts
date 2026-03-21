@@ -1,4 +1,4 @@
-import { MigrationInterface, QueryRunner, Table } from 'typeorm';
+import { MigrationInterface, QueryRunner, Table } from 'typeorm'
 
 export class CreateGroupsTable1727623454834 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -55,10 +55,10 @@ export class CreateGroupsTable1727623454834 implements MigrationInterface {
         ],
       }),
       true,
-    );
+    )
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropTable('groups');
+    await queryRunner.dropTable('groups')
   }
 }

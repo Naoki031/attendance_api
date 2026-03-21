@@ -1,13 +1,10 @@
-import { DataSource } from 'typeorm';
-import { Seeder, SeederFactoryManager } from 'typeorm-extension';
-import { UserGroupPermission } from '../../../modules/user_group_permissions/entities/user_group_permission.entity';
+import { DataSource } from 'typeorm'
+import { Seeder, SeederFactoryManager } from 'typeorm-extension'
+import { UserGroupPermission } from '../../../modules/user_group_permissions/entities/user_group_permission.entity'
 
 export default class UserGroupPermissionSeeder implements Seeder {
-  public async run(
-    dataSource: DataSource,
-    factoryManager: SeederFactoryManager,
-  ): Promise<any> {
-    const repository = dataSource.getRepository(UserGroupPermission);
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+    const repository = dataSource.getRepository(UserGroupPermission)
 
     await repository.insert([
       {
@@ -16,6 +13,6 @@ export default class UserGroupPermissionSeeder implements Seeder {
         created_at: new Date(),
         updated_at: new Date(),
       },
-    ]);
+    ])
   }
 }

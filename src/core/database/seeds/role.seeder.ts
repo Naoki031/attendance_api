@@ -1,13 +1,10 @@
-import { DataSource } from 'typeorm';
-import { Seeder, SeederFactoryManager } from 'typeorm-extension';
-import { Role } from '../../../modules/roles/entities/role.entity';
+import { DataSource } from 'typeorm'
+import { Seeder, SeederFactoryManager } from 'typeorm-extension'
+import { Role } from '../../../modules/roles/entities/role.entity'
 
 export default class RoleSeeder implements Seeder {
-  public async run(
-    dataSource: DataSource,
-    factoryManager: SeederFactoryManager,
-  ): Promise<any> {
-    const repository = dataSource.getRepository(Role);
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+    const repository = dataSource.getRepository(Role)
 
     await repository.insert([
       {
@@ -22,6 +19,6 @@ export default class RoleSeeder implements Seeder {
         name: 'User',
         key: 'user',
       },
-    ]);
+    ])
   }
 }

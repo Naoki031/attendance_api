@@ -1,13 +1,10 @@
-import { DataSource } from 'typeorm';
-import { Seeder, SeederFactoryManager } from 'typeorm-extension';
-import { PermissionGroup } from '../../../modules/permission_groups/entities/permission_group.entity';
+import { DataSource } from 'typeorm'
+import { Seeder, SeederFactoryManager } from 'typeorm-extension'
+import { PermissionGroup } from '../../../modules/permission_groups/entities/permission_group.entity'
 
 export default class PermissionGroupSeeder implements Seeder {
-  public async run(
-    dataSource: DataSource,
-    factoryManager: SeederFactoryManager,
-  ): Promise<any> {
-    const repository = dataSource.getRepository(PermissionGroup);
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+    const repository = dataSource.getRepository(PermissionGroup)
 
     await repository.insert([
       {
@@ -18,7 +15,7 @@ export default class PermissionGroupSeeder implements Seeder {
       },
       {
         name: 'Admin',
-        permissions: JSON.stringify(['create', 'update', 'delete']),
+        permissions: JSON.stringify(['read', 'create', 'update', 'delete']),
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -28,6 +25,6 @@ export default class PermissionGroupSeeder implements Seeder {
         created_at: new Date(),
         updated_at: new Date(),
       },
-    ]);
+    ])
   }
 }

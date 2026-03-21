@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Role } from './entities/role.entity';
-import { CreateRoleDto } from './dto/create-role.dto';
-import { UpdateRoleDto } from './dto/update-role.dto';
+import { Injectable } from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Repository } from 'typeorm'
+import { Role } from './entities/role.entity'
+import { CreateRoleDto } from './dto/create-role.dto'
+import { UpdateRoleDto } from './dto/update-role.dto'
 
 @Injectable()
 export class RolesService {
@@ -19,9 +19,9 @@ export class RolesService {
    * @returns A promise that resolves to the created role.
    */
   create(createRoleDto: CreateRoleDto): Promise<Role> {
-    const role = this.roleRepository.save(createRoleDto);
+    const role = this.roleRepository.save(createRoleDto)
 
-    return role;
+    return role
   }
 
   /**
@@ -30,45 +30,43 @@ export class RolesService {
    * @returns {Promise<Role[]>} A promise that resolves to an array of roles.
    */
   findAll(): Promise<Role[]> {
-    const roles = this.roleRepository.find();
+    const roles = this.roleRepository.find()
 
-    return roles;
+    return roles
   }
 
   /**
    * Finds a role by its ID.
    *
-   * @param {number} id - The ID of the role to find.
+   * @param {number} roleId - The ID of the role to find.
    * @returns {Promise<Role>} A promise that resolves to the found role.
    */
-  findOne(id: number): Promise<Role> {
-    const role = this.roleRepository.findOne({ where: { id } });
+  findOne(roleId: number): Promise<Role> {
+    const role = this.roleRepository.findOne({ where: { id: roleId } })
 
-    return role;
+    return role
   }
 
   /**
    * Updates an existing role with the provided data.
    *
-   * @param {number} id - The ID of the role to update.
+   * @param {number} roleId - The ID of the role to update.
    * @param {UpdateRoleDto} updateRoleDto - The data to update the role with.
    * @returns {Promise<Role>} A promise that resolves to the updated role.
    */
-  update(id: number, updateRoleDto: UpdateRoleDto): Promise<Role> {
-    const role = this.roleRepository.save({ id, ...updateRoleDto });
+  update(roleId: number, updateRoleDto: UpdateRoleDto): Promise<Role> {
+    const role = this.roleRepository.save({ id: roleId, ...updateRoleDto })
 
-    return role;
+    return role
   }
 
   /**
    * Removes a role by its ID.
    *
-   * @param {number} id - The ID of the role to remove.
+   * @param {number} roleId - The ID of the role to remove.
    * @returns {Promise<boolean>} A promise that resolves to `true` if the role was successfully removed, otherwise `false`.
    */
-  remove(id: number): Promise<boolean> {
-    return this.roleRepository
-      .delete(id)
-      .then((result) => result.affected === 1);
+  remove(roleId: number): Promise<boolean> {
+    return this.roleRepository.delete(roleId).then((result) => result.affected === 1)
   }
 }

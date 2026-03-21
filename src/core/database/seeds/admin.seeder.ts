@@ -1,14 +1,11 @@
-import { hash } from 'bcrypt';
-import { DataSource } from 'typeorm';
-import { Seeder, SeederFactoryManager } from 'typeorm-extension';
-import { User } from '../../../modules/users/entities/user.entity';
+import { hash } from 'bcrypt'
+import { DataSource } from 'typeorm'
+import { Seeder, SeederFactoryManager } from 'typeorm-extension'
+import { User } from '../../../modules/users/entities/user.entity'
 
 export default class AdminSeeder implements Seeder {
-  public async run(
-    dataSource: DataSource,
-    factoryManager: SeederFactoryManager,
-  ): Promise<any> {
-    const repository = dataSource.getRepository(User);
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+    const repository = dataSource.getRepository(User)
 
     await repository.insert([
       {
@@ -17,14 +14,13 @@ export default class AdminSeeder implements Seeder {
         last_name: 'Nguyen',
         position: 'Leader',
         phone_number: '0909090909',
-        email: 'trucnguyen.dofuu@gmail.com',
+        email: 'admin@gmail.com',
         address: 'HCMC',
-        password: await hash('admin123', 10),
+        password: await hash('password', 10),
         is_activated: true,
-        roles: '["super_admin", "user"]',
         created_at: new Date(),
         updated_at: new Date(),
       },
-    ]);
+    ])
   }
 }

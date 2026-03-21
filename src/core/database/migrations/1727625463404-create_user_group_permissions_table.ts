@@ -1,13 +1,6 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  Table,
-  TableForeignKey,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableForeignKey } from 'typeorm'
 
-export class CreateUserGroupPermissionsTable1727625463404
-  implements MigrationInterface
-{
+export class CreateUserGroupPermissionsTable1727625463404 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.createTable(
       new Table({
@@ -47,7 +40,7 @@ export class CreateUserGroupPermissionsTable1727625463404
         ],
       }),
       true,
-    );
+    )
 
     // Foreign key for user_id
     await queryRunner.createForeignKey(
@@ -59,7 +52,7 @@ export class CreateUserGroupPermissionsTable1727625463404
         onDelete: 'CASCADE',
         onUpdate: 'CASCADE',
       }),
-    );
+    )
 
     // Foreign key for permission_group_id
     await queryRunner.createForeignKey(
@@ -71,10 +64,10 @@ export class CreateUserGroupPermissionsTable1727625463404
         onDelete: 'CASCADE',
         onUpdate: 'CASCADE',
       }),
-    );
+    )
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropTable('user_group_permissions');
+    await queryRunner.dropTable('user_group_permissions')
   }
 }

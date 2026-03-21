@@ -1,18 +1,18 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { PermissionGroupsService } from './permission_groups.service';
+import { Test, TestingModule } from '@nestjs/testing'
+import { PermissionGroupsService } from './permission_groups.service'
 
 describe('PermissionGroupsService', () => {
-  let service: PermissionGroupsService;
+  let service: PermissionGroupsService
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [PermissionGroupsService],
-    }).compile();
+    }).compile()
 
-    service = module.get<PermissionGroupsService>(PermissionGroupsService);
-  });
+    service = module.get<PermissionGroupsService>(PermissionGroupsService)
+  })
 
   it('should be defined', () => {
-    expect(service).toBeDefined();
-  });
-});
+    expect(service).toBeDefined()
+  })
+})

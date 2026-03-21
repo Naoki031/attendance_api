@@ -1,13 +1,10 @@
-import { DataSource } from 'typeorm';
-import { Seeder, SeederFactoryManager } from 'typeorm-extension';
-import { Permission } from '../../../modules/permissions/entities/permission.entity';
+import { DataSource } from 'typeorm'
+import { Seeder, SeederFactoryManager } from 'typeorm-extension'
+import { Permission } from '../../../modules/permissions/entities/permission.entity'
 
 export default class PermissionSeeder implements Seeder {
-  public async run(
-    dataSource: DataSource,
-    factoryManager: SeederFactoryManager,
-  ): Promise<any> {
-    const repository = dataSource.getRepository(Permission);
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+    const repository = dataSource.getRepository(Permission)
 
     await repository.insert([
       {
@@ -40,6 +37,6 @@ export default class PermissionSeeder implements Seeder {
         created_at: new Date(),
         updated_at: new Date(),
       },
-    ]);
+    ])
   }
 }

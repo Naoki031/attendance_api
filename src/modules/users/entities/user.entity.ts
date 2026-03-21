@@ -6,6 +6,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity';
+import { Expose } from 'class-transformer';
 
 @Entity({ name: 'users' })
 export class User {
@@ -69,12 +70,6 @@ export class User {
   is_activated!: boolean;
 
   @Column({
-    nullable: false,
-    name: 'roles',
-  })
-  roles!: string;
-  
-  @Column({
     nullable: true,
     name: 'avatar',
   })
@@ -136,4 +131,17 @@ export class User {
 
   @OneToMany(() => UserGroupPermission, (userGroupPermission) => userGroupPermission.user)
   user_group_permissions?: UserGroupPermission[];
+
+  @Expose()
+  get full_name(): string {
+    return `${this.first_name} ${this.last_name}`;
+  }
+
+  @Expose()
+  get roles(): string[] {
+    if (!this.user_group_permissions) return [];
+    return this.user_group_permissions
+      .map((ugp) => ugp.permission_group?.name)
+      .filter((name) => !!name);
+  }
 }
