@@ -1,41 +1,36 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm'
 
 @Entity({ name: 'permissions' })
 export class Permission {
   @PrimaryGeneratedColumn()
-  id!: number;
+  id!: number
 
   @Column({
     nullable: false,
     unique: true,
   })
-  name!: string;
+  name!: string
 
   @Column({
     nullable: false,
     unique: true,
   })
-  key!: string;
+  key!: string
 
   @Column({
     nullable: true,
   })
-  descriptions?: string;
+  descriptions?: string
 
   @CreateDateColumn({
     nullable: true,
     name: 'created_at',
   })
-  created_at?: Date;
+  created_at?: Date
 
   @CreateDateColumn({
     nullable: true,
     name: 'updated_at',
   })
-  updated_at?: Date;
+  updated_at?: Date
 }

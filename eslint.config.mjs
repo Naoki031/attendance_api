@@ -2,6 +2,7 @@
 // ESLint v9 flat config
 import tseslint from 'typescript-eslint'
 import prettierRecommended from 'eslint-plugin-prettier/recommended'
+import unicorn from 'eslint-plugin-unicorn'
 
 export default tseslint.config(
   // Ignored paths
@@ -54,7 +55,34 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
+
+      // No single-character variable or parameter names (except _ for ignored vars)
+      'id-length': ['error', { min: 2, exceptions: ['_'], properties: 'never' }],
+
+      // Bare 'id' as a parameter is forbidden — use entity-specific name (userId, countryId, etc.)
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            ':matches(FunctionDeclaration, ArrowFunctionExpression, FunctionExpression) > .params > Identifier[name="id"]',
+          message:
+            'Use a descriptive ID parameter name (e.g., userId, countryId) instead of bare "id".',
+        },
+      ],
+
+      // No abbreviations — identifiers must be written in full
+      'unicorn/prevent-abbreviations': [
+        'error',
+        {
+          allowList: {
+            // NestJS / TypeScript ecosystem acronyms — not abbreviations
+            Dto: true,
+            dto: true,
+          },
+        },
+      ],
     },
+    plugins: { unicorn },
   },
 
   // Test files — relax rules

@@ -1,7 +1,7 @@
-import * as dotenv from 'dotenv';
-import { DBConfig } from './interfaces/db-config.interface';
+import * as dotenv from 'dotenv'
+import { DBConfig } from './interfaces/database-config.interface'
 
-dotenv.config();
+dotenv.config()
 export const databaseConfig: DBConfig = {
   development: {
     type: (process.env.DB_DIALECT as any) || 'mysql',
@@ -27,4 +27,4 @@ export const databaseConfig: DBConfig = {
     logging: false,
     synchronize: false,
   },
-};
+}

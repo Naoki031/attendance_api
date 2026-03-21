@@ -1,13 +1,10 @@
-import { DataSource } from 'typeorm';
-import { Seeder, SeederFactoryManager } from 'typeorm-extension';
-import { Country } from '../../../modules/countries/entities/country.entity';
+import { DataSource } from 'typeorm'
+import { Seeder, SeederFactoryManager } from 'typeorm-extension'
+import { Country } from '../../../modules/countries/entities/country.entity'
 
 export default class CountrySeeder implements Seeder {
-  public async run(
-    dataSource: DataSource,
-    factoryManager: SeederFactoryManager,
-  ): Promise<any> {
-    const repository = dataSource.getRepository(Country);
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+    const repository = dataSource.getRepository(Country)
 
     await repository.insert([
       {
@@ -49,6 +46,6 @@ export default class CountrySeeder implements Seeder {
         latitude: 52.520008,
         longitude: 13.404954,
       },
-    ]);
+    ])
   }
 }

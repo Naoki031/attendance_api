@@ -1,9 +1,4 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  Table,
-  TableForeignKey,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableForeignKey } from 'typeorm'
 
 export class CreateCompaniesTable1727623424196 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -97,7 +92,7 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
         ],
       }),
       true,
-    );
+    )
 
     // Create foreign key for country_id
     await queryRunner.createForeignKey(
@@ -108,7 +103,7 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
         referencedTableName: 'countries',
         onDelete: 'SET NULL',
       }),
-    );
+    )
 
     // Create foreign key for city_id
     await queryRunner.createForeignKey(
@@ -119,10 +114,10 @@ export class CreateCompaniesTable1727623424196 implements MigrationInterface {
         referencedTableName: 'cities',
         onDelete: 'SET NULL',
       }),
-    );
+    )
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropTable('companies');
+    await queryRunner.dropTable('companies')
   }
 }

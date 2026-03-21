@@ -1,23 +1,23 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator'
 
 export class CreateCountryDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name: string
 
   @IsString()
   @IsNotEmpty()
-  slug: string;
+  slug: string
 
   @IsString()
   @IsOptional()
-  capital?: string;
+  capital?: string
 
   @IsNumber()
   @IsOptional()
-  latitude?: number;
+  latitude?: number
 
   @IsNumber()
   @IsOptional()
-  longitude?: number;
+  longitude?: number
 }

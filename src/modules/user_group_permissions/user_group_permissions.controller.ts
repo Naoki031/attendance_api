@@ -1,7 +1,7 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { UserGroupPermissionsService } from './user_group_permissions.service';
-import { CreateUserGroupPermissionDto } from './dto/create-user_group_permission.dto';
-import { UpdateUserGroupPermissionDto } from './dto/update-user_group_permission.dto';
+import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common'
+import { UserGroupPermissionsService } from './user_group_permissions.service'
+import { CreateUserGroupPermissionDto } from './dto/create-user_group_permission.dto'
+import { UpdateUserGroupPermissionDto } from './dto/update-user_group_permission.dto'
 
 @Controller('user-group-permissions')
 export class UserGroupPermissionsController {
@@ -9,26 +9,29 @@ export class UserGroupPermissionsController {
 
   @Post()
   create(@Body() createUserGroupPermissionDto: CreateUserGroupPermissionDto) {
-    return this.userGroupPermissionsService.create(createUserGroupPermissionDto);
+    return this.userGroupPermissionsService.create(createUserGroupPermissionDto)
   }
 
   @Get()
   findAll() {
-    return this.userGroupPermissionsService.findAll();
+    return this.userGroupPermissionsService.findAll()
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.userGroupPermissionsService.findOne(+id);
+  findOne(@Param('id') userGroupPermissionId: string) {
+    return this.userGroupPermissionsService.findOne(+userGroupPermissionId)
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserGroupPermissionDto: UpdateUserGroupPermissionDto) {
-    return this.userGroupPermissionsService.update(+id, updateUserGroupPermissionDto);
+  update(
+    @Param('id') userGroupPermissionId: string,
+    @Body() updateUserGroupPermissionDto: UpdateUserGroupPermissionDto,
+  ) {
+    return this.userGroupPermissionsService.update(+userGroupPermissionId, updateUserGroupPermissionDto)
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.userGroupPermissionsService.remove(+id);
+  remove(@Param('id') userGroupPermissionId: string) {
+    return this.userGroupPermissionsService.remove(+userGroupPermissionId)
   }
 }

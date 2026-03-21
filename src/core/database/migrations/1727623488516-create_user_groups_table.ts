@@ -1,9 +1,4 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  Table,
-  TableForeignKey,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableForeignKey } from 'typeorm'
 
 export class CreateUserGroupsTable1727623488516 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -45,7 +40,7 @@ export class CreateUserGroupsTable1727623488516 implements MigrationInterface {
         ],
       }),
       true,
-    );
+    )
 
     // Foreign key for user_id
     await queryRunner.createForeignKey(
@@ -57,7 +52,7 @@ export class CreateUserGroupsTable1727623488516 implements MigrationInterface {
         onDelete: 'CASCADE',
         onUpdate: 'CASCADE',
       }),
-    );
+    )
 
     // Foreign key for group_id
     await queryRunner.createForeignKey(
@@ -69,10 +64,10 @@ export class CreateUserGroupsTable1727623488516 implements MigrationInterface {
         onDelete: 'CASCADE',
         onUpdate: 'CASCADE',
       }),
-    );
+    )
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropTable('user_groups');
+    await queryRunner.dropTable('user_groups')
   }
 }

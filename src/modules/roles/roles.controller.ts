@@ -9,12 +9,12 @@ import {
   ParseIntPipe,
   ValidationPipe,
   UseGuards,
-} from '@nestjs/common';
-import { RolesService } from './roles.service';
-import { CreateRoleDto } from './dto/create-role.dto';
-import { UpdateRoleDto } from './dto/update-role.dto';
-import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard';
-import { Permissions } from '@/modules/permissions/decorators/permissions.decorator';
+} from '@nestjs/common'
+import { RolesService } from './roles.service'
+import { CreateRoleDto } from './dto/create-role.dto'
+import { UpdateRoleDto } from './dto/update-role.dto'
+import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
+import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
 
 @Controller('roles')
 @UseGuards(PermissionsGuard)
@@ -25,44 +25,44 @@ export class RolesController {
   @Permissions('create')
   async create(@Body(ValidationPipe) createRoleDto: CreateRoleDto) {
     try {
-      return await this.rolesService.create(createRoleDto);
+      return await this.rolesService.create(createRoleDto)
     } catch (error) {
-      console.error('Error creating role:', error);
+      console.error('Error creating role:', error)
 
-      throw error;
+      throw error
     }
   }
 
   @Get()
   @Permissions('read')
   findAll() {
-    return this.rolesService.findAll();
+    return this.rolesService.findAll()
   }
 
   @Get(':id')
   @Permissions('read')
-  findOne(@Param('id', ParseIntPipe) id: string) {
-    return this.rolesService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) roleId: string) {
+    return this.rolesService.findOne(+roleId)
   }
 
   @Put(':id')
   @Permissions('update')
   async update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseIntPipe) roleId: number,
     @Body(ValidationPipe) updateRoleDto: UpdateRoleDto,
   ) {
     try {
-      return await this.rolesService.update(+id, updateRoleDto);
+      return await this.rolesService.update(+roleId, updateRoleDto)
     } catch (error) {
-      console.error('Error updating role:', error);
+      console.error('Error updating role:', error)
 
-      throw error;
+      throw error
     }
   }
 
   @Delete(':id')
   @Permissions('delete')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.rolesService.remove(+id);
+  remove(@Param('id', ParseIntPipe) roleId: number) {
+    return this.rolesService.remove(+roleId)
   }
 }

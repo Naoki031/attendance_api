@@ -1,13 +1,6 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  Table,
-  TableForeignKey,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableForeignKey } from 'typeorm'
 
-export class CreateUserDepartmentsTable1727623440505
-  implements MigrationInterface
-{
+export class CreateUserDepartmentsTable1727623440505 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.createTable(
       new Table({
@@ -52,7 +45,7 @@ export class CreateUserDepartmentsTable1727623440505
         ],
       }),
       true,
-    );
+    )
 
     // Foreign key for user_id
     await queryRunner.createForeignKey(
@@ -64,7 +57,7 @@ export class CreateUserDepartmentsTable1727623440505
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
       }),
-    );
+    )
 
     // Foreign key for company_id
     await queryRunner.createForeignKey(
@@ -76,7 +69,7 @@ export class CreateUserDepartmentsTable1727623440505
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
       }),
-    );
+    )
 
     // Foreign key for department_id
     await queryRunner.createForeignKey(
@@ -88,10 +81,10 @@ export class CreateUserDepartmentsTable1727623440505
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
       }),
-    );
+    )
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropTable('user_departments');
+    await queryRunner.dropTable('user_departments')
   }
 }
