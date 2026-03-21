@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
+import { UserDepartment } from '@/modules/user_departments/entities/user_department.entity'
 import { Exclude, Expose } from 'class-transformer'
 
 @Entity({ name: 'users' })
@@ -128,6 +129,9 @@ export class User {
   @Exclude()
   @OneToMany(() => UserGroupPermission, (userGroupPermission) => userGroupPermission.user)
   user_group_permissions?: UserGroupPermission[]
+
+  @OneToMany(() => UserDepartment, (userDepartment) => userDepartment.user)
+  user_departments?: UserDepartment[]
 
   @Expose()
   get full_name(): string {

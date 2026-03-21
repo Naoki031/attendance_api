@@ -15,6 +15,7 @@ import { AuthModule } from './modules/auth/auth.module'
 import { CitiesModule } from './modules/cities/cities.module'
 import { CompaniesModule } from './modules/companies/companies.module'
 import { DepartmentsModule } from './modules/departments/departments.module'
+import { UserDepartmentsModule } from './modules/user_departments/user_departments.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
 import { APP_GUARD } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
@@ -33,6 +34,7 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
     CitiesModule,
     CompaniesModule,
     DepartmentsModule,
+    UserDepartmentsModule,
     // GroupsModule,
     // EmployeesModule,
   ],

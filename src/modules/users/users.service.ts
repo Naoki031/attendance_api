@@ -53,8 +53,39 @@ export class UsersService {
    */
   findAll(): Promise<User[]> {
     return this.userRepository.find({
-      relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
+      relations: [
+        'user_group_permissions',
+        'user_group_permissions.permission_group',
+        'user_departments',
+        'user_departments.department',
+        'user_departments.company',
+      ],
     })
+  }
+
+  /**
+   * Searches users by first name, last name, or email using a case-insensitive partial match.
+   * Returns at most `limit` results to avoid loading the full table.
+   *
+   * @param {string} query - The search string.
+   * @param {number} limit - Maximum number of results (default 20).
+   * @returns {Promise<User[]>} A promise that resolves to matching users.
+   */
+  async search(query: string, limit = 20): Promise<User[]> {
+    const lowerQuery = `%${query.toLowerCase()}%`
+    const numericId = /^\d+$/.test(query) ? parseInt(query, 10) : null
+
+    const queryBuilder = this.userRepository
+      .createQueryBuilder('user')
+      .where('LOWER(user.first_name) LIKE :query', { query: lowerQuery })
+      .orWhere('LOWER(user.last_name) LIKE :query', { query: lowerQuery })
+      .orWhere('LOWER(user.email) LIKE :query', { query: lowerQuery })
+
+    if (numericId !== null) {
+      queryBuilder.orWhere('user.id = :id', { id: numericId })
+    }
+
+    return queryBuilder.take(limit).getMany()
   }
 
   /**
@@ -92,7 +123,13 @@ export class UsersService {
   async findOne(userId: number): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
+      relations: [
+        'user_group_permissions',
+        'user_group_permissions.permission_group',
+        'user_departments',
+        'user_departments.department',
+        'user_departments.company',
+      ],
     })
 
     if (!user) {
