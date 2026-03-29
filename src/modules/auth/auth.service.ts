@@ -3,16 +3,22 @@ import {
   UnauthorizedException,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import * as bcrypt from 'bcrypt'
+import * as fs from 'fs/promises'
+import * as path from 'path'
 import { UsersService } from '@/modules/users/users.service'
 import { User } from '@/modules/users/entities/user.entity'
 import { UpdateProfileDto } from './dto/update-profile.dto'
 import { ChangePasswordDto } from './dto/change-password.dto'
+import { UpdateAvatarDto } from './dto/update-avatar.dto'
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name)
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
@@ -68,7 +74,7 @@ export class AuthService {
   }
 
   async getProfile(userId: number): Promise<Omit<User, 'password'>> {
-    const user = await this.usersService.findOneWithPermissions(userId)
+    const user = await this.usersService.findOne(userId)
 
     if (!user) {
       throw new NotFoundException('User not found')
@@ -126,5 +132,46 @@ export class AuthService {
     }
 
     await this.usersService.update(userId, { password: dto.new_password })
+  }
+
+  /**
+   * Updates the authenticated user's avatar.
+   * Saves the base64 image to disk, deletes the old avatar file, and updates the user record.
+   */
+  async updateAvatar(userId: number, dto: UpdateAvatarDto): Promise<Omit<User, 'password'>> {
+    const user = await this.usersService.findOne(userId)
+    if (!user) throw new NotFoundException('User not found')
+
+    const matches = dto.avatar.match(/^data:image\/(\w+);base64,(.+)$/)
+    if (!matches) throw new BadRequestException('Invalid image data')
+
+    const buffer = Buffer.from(matches[2], 'base64')
+
+    // Generate filename: username_timestamp.jpg
+    const safeName = (user.username ?? user.email.split('@')[0]).replace(/[^a-zA-Z0-9_-]/g, '_')
+    const filename = `${safeName}_${Date.now()}.jpg`
+    const uploadDirectory = path.join(process.cwd(), 'uploads', 'avatars')
+    const filepath = path.join(uploadDirectory, filename)
+
+    try {
+      await fs.mkdir(uploadDirectory, { recursive: true })
+    } catch (error) {
+      this.logger.error('Failed to create avatar upload directory:', error)
+    }
+
+    // Delete old avatar file if exists
+    if (user.avatar) {
+      try {
+        const oldPath = path.join(process.cwd(), user.avatar)
+        await fs.unlink(oldPath)
+      } catch {
+        // Old file might not exist, ignore
+      }
+    }
+
+    await fs.writeFile(filepath, buffer)
+    await this.usersService.update(userId, { avatar: `/uploads/avatars/${filename}` })
+
+    return this.getProfile(userId)
   }
 }

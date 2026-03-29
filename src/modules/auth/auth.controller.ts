@@ -18,6 +18,7 @@ import { Public } from './decorators/public.decorator'
 import { User } from './decorators/user.decorator'
 import { UpdateProfileDto } from './dto/update-profile.dto'
 import { ChangePasswordDto } from './dto/change-password.dto'
+import { UpdateAvatarDto } from './dto/update-avatar.dto'
 
 @Controller('auth')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -53,5 +54,10 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   changePassword(@User() user, @Body(ValidationPipe) dto: ChangePasswordDto) {
     return this.authService.changePassword(user.id, dto)
+  }
+
+  @Put('avatar')
+  updateAvatar(@User() user, @Body(ValidationPipe) dto: UpdateAvatarDto) {
+    return this.authService.updateAvatar(user.id, dto)
   }
 }
