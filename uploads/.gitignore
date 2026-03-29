@@ -1,0 +1,7 @@
+# Ignore all uploaded files
+**/*
+
+# Keep this file and empty directory structure
+!.gitignore
+!bug_reports/.gitkeep
+!avatars/.gitkeep
