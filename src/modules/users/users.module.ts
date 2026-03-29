@@ -5,9 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { usersProviders } from './users.provider'
 import { User } from './entities/user.entity'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
+import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_work_schedule.entity'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, UserGroupPermission])],
+  imports: [TypeOrmModule.forFeature([User, UserGroupPermission, UserWorkSchedule])],
   controllers: [UsersController],
   providers: [UsersService, ...usersProviders],
   exports: [UsersService],

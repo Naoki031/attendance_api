@@ -1,6 +1,19 @@
-import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, MinLength } from 'class-validator'
+import {
+  IsArray,
+  IsBoolean,
+  IsEmail,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator'
+import { Type } from 'class-transformer'
 
 export class UpdateUserDto {
+  @IsOptional()
+  @IsEmail()
+  email?: string
+
   @IsOptional()
   @IsString()
   first_name?: string
@@ -58,4 +71,29 @@ export class UpdateUserDto {
   @IsArray()
   @IsNumber({}, { each: true })
   permission_group_ids?: number[]
+
+  @IsOptional()
+  @IsString()
+  slack_id?: string | null
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  device_user_id?: number | null
+
+  @IsOptional()
+  @IsBoolean()
+  skip_attendance?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  permanent_remote?: boolean
+
+  @IsOptional()
+  @IsString()
+  permanent_remote_reason?: string | null
+
+  @IsOptional()
+  @IsString()
+  avatar?: string
 }

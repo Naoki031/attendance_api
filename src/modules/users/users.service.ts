@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as bcrypt from 'bcrypt'
@@ -23,6 +23,11 @@ export class UsersService {
    * @returns {Promise<User>} A promise that resolves to the created user.
    */
   async create(createUserDto: CreateUserDto): Promise<User> {
+    const existing = await this.userRepository.findOne({ where: { email: createUserDto.email } })
+    if (existing) {
+      throw new ConflictException('Email already taken')
+    }
+
     const { is_active, password, permission_group_ids, ...rest } = createUserDto
     const hashedPassword = await bcrypt.hash(password, parseInt(process.env.SALT_ROUNDS ?? '10'))
     const username = createUserDto.email.split('@')[0]
@@ -59,6 +64,7 @@ export class UsersService {
         'user_departments',
         'user_departments.department',
         'user_departments.company',
+        'user_work_schedules',
       ],
     })
   }
@@ -76,6 +82,7 @@ export class UsersService {
     position?: string
     email?: string
     departmentId?: number
+    companyId?: number
     role?: string
     status?: string
     contractType?: string
@@ -87,6 +94,7 @@ export class UsersService {
       .leftJoinAndSelect('user.user_departments', 'userDepartment')
       .leftJoinAndSelect('userDepartment.department', 'department')
       .leftJoinAndSelect('userDepartment.company', 'company')
+      .leftJoinAndSelect('user.user_work_schedules', 'userWorkSchedule')
 
     if (parameters.userId) {
       queryBuilder.andWhere('user.id = :userId', { userId: parameters.userId })
@@ -116,6 +124,13 @@ export class UsersService {
       queryBuilder.andWhere(
         'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.department_id = :departmentId)',
         { departmentId: parameters.departmentId },
+      )
+    }
+
+    if (parameters.companyId) {
+      queryBuilder.andWhere(
+        'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id = :companyId)',
+        { companyId: parameters.companyId },
       )
     }
 
@@ -230,6 +245,13 @@ export class UsersService {
    * @throws {NotFoundException} If the user with the given ID is not found.
    */
   async update(userId: number, updateUserDto: UpdateUserDto): Promise<User> {
+    if (updateUserDto.email) {
+      const existing = await this.userRepository.findOne({ where: { email: updateUserDto.email } })
+      if (existing && existing.id !== userId) {
+        throw new ConflictException('Email already taken')
+      }
+    }
+
     const { is_active, password, permission_group_ids, ...rest } = updateUserDto
 
     const updateData: Partial<User> = { ...rest }

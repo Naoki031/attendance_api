@@ -32,6 +32,7 @@ export class UsersController {
     @Query('position') position?: string,
     @Query('email') email?: string,
     @Query('department_id') departmentId?: string,
+    @Query('company_id') companyId?: string,
     @Query('role') role?: string,
     @Query('status') status?: string,
     @Query('contract_type') contractType?: string,
@@ -41,7 +42,15 @@ export class UsersController {
     }
 
     const hasFilter =
-      userId || name || position || email || departmentId || role || status || contractType
+      userId ||
+      name ||
+      position ||
+      email ||
+      departmentId ||
+      companyId ||
+      role ||
+      status ||
+      contractType
 
     if (hasFilter) {
       return this.usersService.findWithFilters({
@@ -50,6 +59,7 @@ export class UsersController {
         position,
         email,
         departmentId: departmentId ? parseInt(departmentId, 10) : undefined,
+        companyId: companyId ? parseInt(companyId, 10) : undefined,
         role,
         status,
         contractType,

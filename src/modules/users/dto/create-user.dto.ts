@@ -62,6 +62,22 @@ export class CreateUserDto {
   contract_count?: number
 
   @IsOptional()
+  @IsString()
+  slack_id?: string
+
+  @IsOptional()
+  @IsBoolean()
+  skip_attendance?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  permanent_remote?: boolean
+
+  @IsOptional()
+  @IsString()
+  permanent_remote_reason?: string
+
+  @IsOptional()
   @IsArray()
   @IsNumber({}, { each: true })
   permission_group_ids?: number[]
