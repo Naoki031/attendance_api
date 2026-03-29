@@ -6,6 +6,7 @@ import {
   Put,
   Param,
   Delete,
+  Query,
   ParseIntPipe,
   ValidationPipe,
   UseGuards,
@@ -34,7 +35,14 @@ export class CitiesController {
 
   @Get()
   @Permissions('read')
-  findAll() {
+  findAll(@Query('search') search?: string, @Query('country_id') countryId?: string) {
+    if (search || countryId) {
+      return this.citiesService.findWithFilters({
+        search,
+        countryId: countryId ? parseInt(countryId, 10) : undefined,
+      })
+    }
+
     return this.citiesService.findAll()
   }
 

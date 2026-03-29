@@ -5,6 +5,11 @@ import { City } from './entities/city.entity'
 import { CreateCityDto } from './dto/create-city.dto'
 import { UpdateCityDto } from './dto/update-city.dto'
 
+interface CityFilters {
+  search?: string
+  countryId?: number
+}
+
 @Injectable()
 export class CitiesService {
   constructor(
@@ -41,6 +46,31 @@ export class CitiesService {
    */
   async findAll(): Promise<City[]> {
     return this.cityRepository.find({ relations: ['country'] })
+  }
+
+  /**
+   * Retrieves cities matching the given filter criteria.
+   *
+   * @param {CityFilters} filters - The filter criteria.
+   * @returns A promise that resolves to an array of matching cities.
+   */
+  async findWithFilters(filters: CityFilters): Promise<City[]> {
+    const queryBuilder = this.cityRepository
+      .createQueryBuilder('city')
+      .leftJoinAndSelect('city.country', 'country')
+
+    if (filters.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`
+      queryBuilder.andWhere('(LOWER(city.name) LIKE :search OR LOWER(city.slug) LIKE :search)', {
+        search: searchTerm,
+      })
+    }
+
+    if (filters.countryId) {
+      queryBuilder.andWhere('city.country_id = :countryId', { countryId: filters.countryId })
+    }
+
+    return queryBuilder.getMany()
   }
 
   /**

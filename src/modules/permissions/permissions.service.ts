@@ -5,6 +5,10 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Permission } from './entities/permission.entity'
 
+interface PermissionFilters {
+  search?: string
+}
+
 @Injectable()
 export class PermissionsService {
   constructor(
@@ -36,6 +40,26 @@ export class PermissionsService {
     const permissions = this.permissionRepository.find()
 
     return permissions
+  }
+
+  /**
+   * Retrieves permissions matching the given filter criteria.
+   *
+   * @param {PermissionFilters} filters - The filter criteria.
+   * @returns A promise that resolves to an array of matching permissions.
+   */
+  async findWithFilters(filters: PermissionFilters): Promise<Permission[]> {
+    const queryBuilder = this.permissionRepository.createQueryBuilder('permission')
+
+    if (filters.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`
+      queryBuilder.andWhere(
+        '(LOWER(permission.name) LIKE :search OR LOWER(permission.key) LIKE :search OR LOWER(permission.descriptions) LIKE :search)',
+        { search: searchTerm },
+      )
+    }
+
+    return queryBuilder.getMany()
   }
 
   /**

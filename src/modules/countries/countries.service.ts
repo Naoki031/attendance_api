@@ -5,6 +5,10 @@ import { Country } from './entities/country.entity'
 import { CreateCountryDto } from './dto/create-country.dto'
 import { UpdateCountryDto } from './dto/update-country.dto'
 
+interface CountryFilters {
+  search?: string
+}
+
 @Injectable()
 export class CountriesService {
   constructor(
@@ -33,6 +37,26 @@ export class CountriesService {
     const countries = await this.countryRepository.find()
 
     return countries
+  }
+
+  /**
+   * Retrieves countries matching the given filter criteria.
+   *
+   * @param {CountryFilters} filters - The filter criteria.
+   * @returns A promise that resolves to an array of matching countries.
+   */
+  async findWithFilters(filters: CountryFilters): Promise<Country[]> {
+    const queryBuilder = this.countryRepository.createQueryBuilder('country')
+
+    if (filters.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`
+      queryBuilder.andWhere(
+        '(LOWER(country.name) LIKE :search OR LOWER(country.slug) LIKE :search OR LOWER(country.capital) LIKE :search)',
+        { search: searchTerm },
+      )
+    }
+
+    return queryBuilder.getMany()
   }
 
   /**

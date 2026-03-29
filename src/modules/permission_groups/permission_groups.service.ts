@@ -5,6 +5,10 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { PermissionGroup } from './entities/permission_group.entity'
 
+interface PermissionGroupFilters {
+  search?: string
+}
+
 @Injectable()
 export class PermissionGroupsService {
   constructor(
@@ -38,6 +42,26 @@ export class PermissionGroupsService {
    */
   findAll(): Promise<PermissionGroup[]> {
     return this.permissionGroupRepository.find()
+  }
+
+  /**
+   * Retrieves permission groups matching the given filter criteria.
+   *
+   * @param {PermissionGroupFilters} filters - The filter criteria.
+   * @returns A promise that resolves to an array of matching permission groups.
+   */
+  async findWithFilters(filters: PermissionGroupFilters): Promise<PermissionGroup[]> {
+    const queryBuilder = this.permissionGroupRepository.createQueryBuilder('permission_group')
+
+    if (filters.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`
+      queryBuilder.andWhere(
+        '(LOWER(permission_group.name) LIKE :search OR LOWER(permission_group.descriptions) LIKE :search)',
+        { search: searchTerm },
+      )
+    }
+
+    return queryBuilder.getMany()
   }
 
   /**

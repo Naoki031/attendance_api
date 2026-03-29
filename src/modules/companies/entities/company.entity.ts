@@ -41,6 +41,33 @@ export class Company {
   @Column({ nullable: true })
   logo?: string
 
+  @Column({ nullable: true, name: 'allowed_ips', type: 'text' })
+  allowed_ips?: string | null
+
+  @Column({
+    nullable: true,
+    name: 'google_calendar_id',
+    length: 255,
+    comment: 'Google Calendar ID for this company (e.g. xxx@group.calendar.google.com)',
+  })
+  google_calendar_id?: string | null
+
+  @Column({
+    nullable: true,
+    name: 'work_start_time',
+    type: 'time',
+    comment: 'Default work start time for this company',
+  })
+  work_start_time?: string | null
+
+  @Column({
+    nullable: true,
+    name: 'work_end_time',
+    type: 'time',
+    comment: 'Default work end time for this company',
+  })
+  work_end_time?: string | null
+
   @ManyToOne(() => Country)
   @JoinColumn({ name: 'country_id' })
   country?: Country

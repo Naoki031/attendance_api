@@ -5,6 +5,10 @@ import { Department } from './entities/department.entity'
 import { CreateDepartmentDto } from './dto/create-department.dto'
 import { UpdateDepartmentDto } from './dto/update-department.dto'
 
+interface DepartmentFilters {
+  search?: string
+}
+
 @Injectable()
 export class DepartmentsService {
   constructor(
@@ -29,6 +33,26 @@ export class DepartmentsService {
    */
   async findAll(): Promise<Department[]> {
     return this.departmentRepository.find()
+  }
+
+  /**
+   * Retrieves departments matching the given filter criteria.
+   *
+   * @param {DepartmentFilters} filters - The filter criteria.
+   * @returns A promise that resolves to an array of matching departments.
+   */
+  async findWithFilters(filters: DepartmentFilters): Promise<Department[]> {
+    const queryBuilder = this.departmentRepository.createQueryBuilder('department')
+
+    if (filters.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`
+      queryBuilder.andWhere(
+        '(LOWER(department.name) LIKE :search OR LOWER(department.slug) LIKE :search OR LOWER(department.descriptions) LIKE :search)',
+        { search: searchTerm },
+      )
+    }
+
+    return queryBuilder.getMany()
   }
 
   /**

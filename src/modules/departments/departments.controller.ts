@@ -6,6 +6,7 @@ import {
   Put,
   Param,
   Delete,
+  Query,
   ParseIntPipe,
   ValidationPipe,
   UseGuards,
@@ -34,7 +35,11 @@ export class DepartmentsController {
 
   @Get()
   @Permissions('read')
-  findAll() {
+  findAll(@Query('search') search?: string) {
+    if (search) {
+      return this.departmentsService.findWithFilters({ search })
+    }
+
     return this.departmentsService.findAll()
   }
 

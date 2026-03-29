@@ -6,6 +6,7 @@ import {
   Put,
   Param,
   Delete,
+  Query,
   ParseIntPipe,
   ValidationPipe,
   UseGuards,
@@ -35,7 +36,11 @@ export class CountriesController {
 
   @Get()
   @Permissions('read')
-  findAll() {
+  findAll(@Query('search') search?: string) {
+    if (search) {
+      return this.countriesService.findWithFilters({ search })
+    }
+
     return this.countriesService.findAll()
   }
 

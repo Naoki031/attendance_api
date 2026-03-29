@@ -36,4 +36,20 @@ export class CreateCompanyDto {
   @IsString()
   @IsOptional()
   logo?: string
+
+  @IsString()
+  @IsNotEmpty()
+  work_start_time!: string
+
+  @IsString()
+  @IsNotEmpty()
+  work_end_time!: string
+
+  @IsString()
+  @IsOptional()
+  allowed_ips?: string
+
+  @IsString()
+  @IsOptional()
+  google_calendar_id?: string
 }

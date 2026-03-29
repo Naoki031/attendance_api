@@ -5,6 +5,10 @@ import { Role } from './entities/role.entity'
 import { CreateRoleDto } from './dto/create-role.dto'
 import { UpdateRoleDto } from './dto/update-role.dto'
 
+interface RoleFilters {
+  search?: string
+}
+
 @Injectable()
 export class RolesService {
   constructor(
@@ -33,6 +37,26 @@ export class RolesService {
     const roles = this.roleRepository.find()
 
     return roles
+  }
+
+  /**
+   * Retrieves roles matching the given filter criteria.
+   *
+   * @param {RoleFilters} filters - The filter criteria.
+   * @returns A promise that resolves to an array of matching roles.
+   */
+  async findWithFilters(filters: RoleFilters): Promise<Role[]> {
+    const queryBuilder = this.roleRepository.createQueryBuilder('role')
+
+    if (filters.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`
+      queryBuilder.andWhere(
+        '(LOWER(role.name) LIKE :search OR LOWER(role.key) LIKE :search OR LOWER(role.descriptions) LIKE :search)',
+        { search: searchTerm },
+      )
+    }
+
+    return queryBuilder.getMany()
   }
 
   /**

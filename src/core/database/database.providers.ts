@@ -12,6 +12,16 @@ import { User } from '@/modules/users/entities/user.entity'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
 import { Department } from '@/modules/departments/entities/department.entity'
 import { UserDepartment } from '@/modules/user_departments/entities/user_department.entity'
+import { SlackChannel } from '@/modules/slack_channels/entities/slack_channel.entity'
+import { EmployeeRequest } from '@/modules/employee_requests/entities/employee_request.entity'
+import { CompanyApprover } from '@/modules/companies/entities/company_approver.entity'
+import { CompanyGoogleSheet } from '@/modules/google_sheets/entities/company_google_sheet.entity'
+import { AttendanceLog } from '@/modules/attendance_logs/entities/attendance_log.entity'
+import { AttendanceLogEdit } from '@/modules/attendance_logs/entities/attendance_log_edit.entity'
+import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_work_schedule.entity'
+import { Group } from '@/modules/groups/entities/group.entity'
+import { UserGroup } from '@/modules/groups/entities/user_group.entity'
+import { BugReport } from '@/modules/bug_reports/entities/bug_report.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -32,6 +42,16 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         UserGroupPermission,
         Department,
         UserDepartment,
+        SlackChannel,
+        EmployeeRequest,
+        CompanyApprover,
+        CompanyGoogleSheet,
+        AttendanceLog,
+        AttendanceLogEdit,
+        UserWorkSchedule,
+        Group,
+        UserGroup,
+        BugReport,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

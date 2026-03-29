@@ -34,6 +34,13 @@ export class Country {
   })
   longitude?: number
 
+  @Column({
+    nullable: true,
+    length: 100,
+    comment: 'IANA timezone identifier, e.g. Asia/Ho_Chi_Minh',
+  })
+  timezone?: string | null
+
   @CreateDateColumn({
     nullable: true,
     name: 'created_at',
