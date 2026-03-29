@@ -24,7 +24,7 @@ export class ChatbotController {
       ['admin', 'super', 'super_admin', 'super admin'].includes(role.toLowerCase()),
     )
 
-    return this.chatbotService.chat(dto.messages, dto.tone, dto.model, dto.language, isAdmin)
+    return this.chatbotService.chat(dto.messages, dto.tone, dto.language, isAdmin)
   }
 
   /**

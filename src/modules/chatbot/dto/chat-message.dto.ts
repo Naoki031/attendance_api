@@ -25,10 +25,5 @@ export class ChatRequestDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'])
-  model?: string
-
-  @IsOptional()
-  @IsString()
   language?: string
 }

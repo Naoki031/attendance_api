@@ -4,14 +4,11 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ChatMessageItemDto } from './dto/chat-message.dto'
 import { PromptBuilderService } from './prompt-builder/prompt-builder.service'
 
-const ALLOWED_MODELS = ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001']
-
 @Injectable()
 export class ChatbotService {
   private readonly logger = new Logger(ChatbotService.name)
   private client: Anthropic | null = null
-  private defaultTone: string = 'professional'
-  private defaultModel: string = 'claude-sonnet-4-6'
+  private model: string = 'claude-sonnet-4-6'
 
   constructor(
     private readonly configService: ConfigService,
@@ -25,8 +22,7 @@ export class ChatbotService {
       return
     }
 
-    this.defaultTone = this.configService.get<string>('CHATBOT_TONE') ?? 'professional'
-    this.defaultModel = this.configService.get<string>('CHATBOT_MODEL') ?? 'claude-sonnet-4-6'
+    this.model = this.configService.get<string>('CHATBOT_MODEL') ?? 'claude-sonnet-4-6'
     this.client = new Anthropic({ apiKey })
   }
 
@@ -55,14 +51,12 @@ export class ChatbotService {
   /**
    * Sends a conversation to Claude and returns the assistant reply with follow-up suggestions.
    * @param tone     - Optional tone override: 'professional' | 'friendly' | 'concise'
-   * @param model    - Optional model override: 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001'
    * @param language - Optional detected language of the user's message (e.g. 'Vietnamese')
    * @param isAdmin  - Whether the requesting user has admin/super_admin role (determined from JWT)
    */
   async chat(
     messages: ChatMessageItemDto[],
     tone?: string,
-    model?: string,
     language?: string,
     isAdmin = false,
   ): Promise<{ reply: string; suggestions: string[] }> {
@@ -70,11 +64,9 @@ export class ChatbotService {
       return { reply: 'Chatbot is not configured. Please set ANTHROPIC_API_KEY.', suggestions: [] }
     }
 
-    const resolvedModel = model && ALLOWED_MODELS.includes(model) ? model : this.defaultModel
-
     try {
       const response = await this.client.messages.create({
-        model: resolvedModel,
+        model: this.model,
         max_tokens: 1024,
         system: this.promptBuilder.buildSystemPrompt({ tone, language, isAdmin }),
         messages: messages.map((message) => ({
