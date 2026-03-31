@@ -4,7 +4,7 @@ import { DBConfig } from './interfaces/database-config.interface'
 dotenv.config()
 export const databaseConfig: DBConfig = {
   development: {
-    type: (process.env.DB_DIALECT as any) || 'mysql',
+    type: (process.env.DB_DIALECT as string) || 'mysql',
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT) || 3306,
     database: process.env.DB_NAME_DEVELOPMENT || '',
@@ -13,11 +13,11 @@ export const databaseConfig: DBConfig = {
     connectTimeout: 60000,
     logging: true,
     synchronize: false,
-    // maxQueryExecutionTime: 1000,
+    timezone: '+00:00',
   },
 
   production: {
-    type: (process.env.DB_DIALECT as any) || 'mysql',
+    type: (process.env.DB_DIALECT as string) || 'mysql',
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT) || 3306,
     database: process.env.DB_NAME_PRODUCTION || '',
@@ -26,5 +26,6 @@ export const databaseConfig: DBConfig = {
     connectTimeout: 60000,
     logging: false,
     synchronize: false,
+    timezone: '+00:00',
   },
 }

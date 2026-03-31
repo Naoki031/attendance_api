@@ -24,6 +24,7 @@ export class UsersService {
    */
   async create(createUserDto: CreateUserDto): Promise<User> {
     const existing = await this.userRepository.findOne({ where: { email: createUserDto.email } })
+
     if (existing) {
       throw new ConflictException('Email already taken')
     }
@@ -299,5 +300,30 @@ export class UsersService {
    */
   remove(id: number) {
     return this.userRepository.delete({ id })
+  }
+
+  /**
+   * Updates the FCM token for the authenticated user.
+   * Stores or replaces the device token used for push notifications.
+   */
+  async updateFcmToken(userId: number, token: string): Promise<void> {
+    await this.userRepository.update({ id: userId }, { fcm_token: token })
+  }
+
+  /**
+   * Returns a map of userId → fcm_token for a list of user IDs.
+   * Only includes users who have a non-null token.
+   */
+  async getFcmTokensForUsers(userIds: number[]): Promise<Map<number, string>> {
+    if (userIds.length === 0) return new Map()
+
+    const users = await this.userRepository
+      .createQueryBuilder('user')
+      .select(['user.id', 'user.fcm_token'])
+      .where('user.id IN (:...userIds)', { userIds })
+      .andWhere('user.fcm_token IS NOT NULL')
+      .getMany()
+
+    return new Map(users.map((user) => [user.id, user.fcm_token!]))
   }
 }

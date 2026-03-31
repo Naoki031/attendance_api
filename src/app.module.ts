@@ -27,6 +27,11 @@ import { IclockModule } from './modules/iclock/iclock.module'
 import { UserWorkSchedulesModule } from './modules/user_work_schedules/user_work_schedules.module'
 import { GroupsModule } from './modules/groups/groups.module'
 import { BugReportsModule } from './modules/bug_reports/bug_reports.module'
+import { TranslateModule } from './modules/translate/translate.module'
+import { ChatModule } from './modules/chat/chat.module'
+import { MessagesModule } from './modules/messages/messages.module'
+import { FirebaseModule } from './modules/firebase/firebase.module'
+import { MessageReactionsModule } from './modules/message_reactions/message-reactions.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
 import { APP_GUARD } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
@@ -57,6 +62,11 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
     GroupsModule,
     ChatbotModule,
     BugReportsModule,
+    TranslateModule,
+    ChatModule,
+    MessagesModule,
+    FirebaseModule,
+    MessageReactionsModule,
     // EmployeesModule,
   ],
   providers: [

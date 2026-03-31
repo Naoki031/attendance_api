@@ -22,6 +22,11 @@ import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_wo
 import { Group } from '@/modules/groups/entities/group.entity'
 import { UserGroup } from '@/modules/groups/entities/user_group.entity'
 import { BugReport } from '@/modules/bug_reports/entities/bug_report.entity'
+import { TranslationCache } from '@/modules/translate/entities/translation_cache.entity'
+import { Message } from '@/modules/messages/entities/message.entity'
+import { ChatRoom } from '@/modules/chat/entities/chat-room.entity'
+import { ChatRoomMember } from '@/modules/chat/entities/chat-room-member.entity'
+import { MessageReaction } from '@/modules/message_reactions/entities/message-reaction.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -52,6 +57,11 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         Group,
         UserGroup,
         BugReport,
+        TranslationCache,
+        Message,
+        ChatRoom,
+        ChatRoomMember,
+        MessageReaction,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

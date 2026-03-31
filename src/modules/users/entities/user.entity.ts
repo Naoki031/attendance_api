@@ -131,6 +131,14 @@ export class User {
   preferred_language?: string
 
   @Column({
+    nullable: true,
+    name: 'fcm_token',
+    type: 'text',
+    comment: 'Firebase Cloud Messaging token for push notifications',
+  })
+  fcm_token?: string
+
+  @Column({
     nullable: false,
     name: 'skip_attendance',
     default: false,

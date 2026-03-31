@@ -27,7 +27,7 @@ export class PermissionGroupsController {
     try {
       return this.permissionGroupsService.create(createPermissionGroupDto)
     } catch (error) {
-      console.log('Error creating permission group:', error)
+      console.error('Error creating permission group:', error)
       throw error
     }
   }
@@ -57,7 +57,8 @@ export class PermissionGroupsController {
     try {
       return this.permissionGroupsService.update(permissionGroupId, updatePermissionGroupDto)
     } catch (error) {
-      console.log('Error updating permission group:', error)
+      console.error('Error updating permission group:', error)
+
       throw error
     }
   }

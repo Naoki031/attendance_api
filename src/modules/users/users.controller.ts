@@ -9,10 +9,14 @@ import {
   Query,
   ClassSerializerInterceptor,
   UseInterceptors,
+  ValidationPipe,
 } from '@nestjs/common'
 import { UsersService } from './users.service'
 import { CreateUserDto } from './dto/create-user.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
+import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto'
+import { User } from '@/modules/auth/decorators/user.decorator'
+import type { User as UserEntity } from '@/modules/users/entities/user.entity'
 
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -82,5 +86,14 @@ export class UsersController {
   @Delete(':id')
   remove(@Param('id') userId: string) {
     return this.usersService.remove(+userId)
+  }
+
+  @Post('me/fcm-token')
+  async updateFcmToken(
+    @Body(ValidationPipe) dto: UpdateFcmTokenDto,
+    @User() user: UserEntity,
+  ): Promise<{ success: boolean }> {
+    await this.usersService.updateFcmToken(user.id, dto.fcm_token)
+    return { success: true }
   }
 }

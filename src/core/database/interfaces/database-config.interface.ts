@@ -12,6 +12,7 @@ export interface DBConfigAttributes {
   connectTimeout?: number
   logging?: boolean
   maxQueryExecutionTime?: number
+  timezone?: string
 }
 
 export interface DBConfig {

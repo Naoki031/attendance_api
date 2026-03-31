@@ -1,0 +1,589 @@
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+} from '@nestjs/websockets'
+import type { Server, Socket } from 'socket.io'
+import { Logger } from '@nestjs/common'
+import { ChatService } from './chat.service'
+import { ChatRoomService } from './chat-room.service'
+import { ChatRoomType, ChatRoomVisibility } from './entities/chat-room.entity'
+import { FirebaseService } from '@/modules/firebase/firebase.service'
+import { UsersService } from '@/modules/users/users.service'
+import { MessageReactionsService } from '@/modules/message_reactions/message-reactions.service'
+
+interface RoomUser {
+  userId: number
+  username: string
+  avatar: string
+  language: string
+}
+
+interface JoinRoomPayload {
+  roomUuid: string
+  userId: number
+  username: string
+  avatar: string
+  language: string
+}
+
+interface LeaveRoomPayload {
+  roomUuid: string
+}
+
+interface SendMessagePayload {
+  roomUuid: string
+  content: string
+  mentionedUserIds?: number[]
+}
+
+interface EditMessagePayload {
+  roomUuid: string
+  messageId: number
+  newContent: string
+}
+
+interface UpdateLanguagePayload {
+  roomUuid: string
+  language: string
+}
+
+interface SendThreadReplyPayload {
+  roomUuid: string
+  parentMessageId: number
+  content: string
+}
+
+interface ToggleReactionPayload {
+  roomUuid: string
+  messageId: number
+  emoji: string
+}
+
+@WebSocketGateway({ cors: { origin: '*' }, namespace: 'chat', path: '/ws' })
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(ChatGateway.name)
+  private readonly roomUsers = new Map<number, Map<string, RoomUser>>()
+
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly chatRoomService: ChatRoomService,
+    private readonly firebaseService: FirebaseService,
+    private readonly usersService: UsersService,
+    private readonly messageReactionsService: MessageReactionsService,
+  ) {}
+
+  @WebSocketServer()
+  private server: Server
+
+  handleConnection(client: Socket) {
+    this.logger.log(`Client connected: ${client.id}`)
+  }
+
+  handleDisconnect(client: Socket) {
+    for (const [roomId, users] of this.roomUsers.entries()) {
+      if (!users.has(client.id)) continue
+
+      const user = users.get(client.id)!
+      users.delete(client.id)
+
+      if (users.size === 0) {
+        this.roomUsers.delete(roomId)
+      }
+
+      this.server.to(`room_${roomId}`).emit('user_left', {
+        roomId,
+        userId: user.userId,
+        username: user.username,
+      })
+
+      // Mark room as read on disconnect
+      this.chatRoomService
+        .markAsRead(roomId, user.userId)
+        .catch((error) => this.logger.error('Failed to mark as read on disconnect', error))
+    }
+  }
+
+  @SubscribeMessage('join_room')
+  async handleJoinRoom(@MessageBody() payload: JoinRoomPayload, @ConnectedSocket() client: Socket) {
+    const { userId, username, avatar, language } = payload
+    let roomId: number
+
+    try {
+      const room = await this.chatRoomService.findByUuid(payload.roomUuid)
+      roomId = room.id
+
+      if (room.visibility === ChatRoomVisibility.PRIVATE || room.type === ChatRoomType.DIRECT) {
+        const isMember = await this.chatRoomService.isMember(roomId, userId)
+
+        if (!isMember) {
+          client.emit('error', { message: 'This is a private room. You are not a member.' })
+
+          return
+        }
+      }
+    } catch {
+      client.emit('error', { message: 'Room not found' })
+
+      return
+    }
+
+    const roomKey = `room_${roomId}`
+    client.join(roomKey)
+
+    // Join personal notification room for real-time unread updates
+    client.join(`user_${userId}`)
+
+    if (!this.roomUsers.has(roomId)) {
+      this.roomUsers.set(roomId, new Map())
+    }
+
+    this.roomUsers.get(roomId)!.set(client.id, { userId, username, avatar, language })
+
+    const onlineUsers = Array.from(this.roomUsers.get(roomId)!.values())
+    client.emit('room_users', onlineUsers)
+
+    client.to(roomKey).emit('user_joined', { userId, username, avatar, language })
+
+    // Mark room as read when user opens it
+    this.chatRoomService
+      .markAsRead(roomId, userId)
+      .catch((error) => this.logger.error('Failed to mark as read on join', error))
+  }
+
+  @SubscribeMessage('leave_room')
+  async handleLeaveRoom(
+    @MessageBody() payload: LeaveRoomPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+    if (!room) return
+
+    const roomId = room.id
+    const roomKey = `room_${roomId}`
+    const users = this.roomUsers.get(roomId)
+
+    if (!users?.has(client.id)) return
+
+    const user = users.get(client.id)!
+    users.delete(client.id)
+
+    if (users.size === 0) {
+      this.roomUsers.delete(roomId)
+    }
+
+    client.leave(roomKey)
+    this.server.to(roomKey).emit('user_left', {
+      roomId,
+      userId: user.userId,
+      username: user.username,
+    })
+
+    // Mark room as read when user leaves
+    this.chatRoomService
+      .markAsRead(roomId, user.userId)
+      .catch((error) => this.logger.error('Failed to mark as read on leave', error))
+  }
+
+  @SubscribeMessage('update_language')
+  async handleUpdateLanguage(
+    @MessageBody() payload: UpdateLanguagePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+    if (!room) return
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) return
+
+    user.language = payload.language
+
+    this.server.to(`room_${roomId}`).emit('user_updated', {
+      userId: user.userId,
+      language: payload.language,
+    })
+  }
+
+  @SubscribeMessage('send_message')
+  async handleSendMessage(
+    @MessageBody() payload: SendMessagePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+
+      return
+    }
+
+    const roomId = room.id
+    const { content } = payload
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+
+      return
+    }
+
+    if (!content?.trim()) {
+      client.emit('error', { message: 'Message content cannot be empty' })
+
+      return
+    }
+
+    try {
+      const result = await this.chatService.sendMessage({
+        roomId,
+        userId: user.userId,
+        username: user.username,
+        avatar: user.avatar,
+        content: content.trim(),
+      })
+
+      this.server.to(`room_${roomId}`).emit('message_new', result)
+
+      // Notify offline members about new unread message
+      this.notifyUnreadUpdate(
+        roomId,
+        room.uuid,
+        user.userId,
+        user.username,
+        content.substring(0, 100),
+        room.name,
+      )
+
+      // Send mention notifications
+      this.notifyMention(room, roomId, user, content.trim(), payload.mentionedUserIds)
+
+      // Translate in background — no await
+      this.chatService
+        .translateMessage({
+          messageId: result.id,
+          content: result.content,
+          detectedLang: result.detectedLang,
+          roomId,
+        })
+        .then((translations) => {
+          if (Object.keys(translations).length > 0) {
+            this.server
+              .to(`room_${roomId}`)
+              .emit('message_translations_ready', { id: result.id, translations })
+          }
+        })
+        .catch((error) => this.logger.error('Background translation failed', error))
+    } catch (error) {
+      this.logger.error('Failed to send message', error)
+      client.emit('error', { message: 'Failed to send message' })
+    }
+  }
+
+  @SubscribeMessage('edit_message')
+  async handleEditMessage(
+    @MessageBody() payload: EditMessagePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+      return
+    }
+
+    const roomId = room.id
+    const { messageId, newContent } = payload
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+
+      return
+    }
+
+    if (!newContent?.trim()) {
+      client.emit('error', { message: 'Message content cannot be empty' })
+
+      return
+    }
+
+    try {
+      const result = await this.chatService.editMessage({
+        messageId,
+        userId: user.userId,
+        roomId,
+        newContent: newContent.trim(),
+        username: user.username,
+        avatar: user.avatar,
+      })
+
+      this.server.to(`room_${roomId}`).emit('message_edited', result)
+
+      // Translate in background — no await
+      this.chatService
+        .translateMessage({
+          messageId: result.id,
+          content: result.content,
+          detectedLang: result.detectedLang,
+          roomId,
+        })
+        .then((translations) => {
+          if (Object.keys(translations).length > 0) {
+            this.server
+              .to(`room_${roomId}`)
+              .emit('message_translations_ready', { id: result.id, translations })
+          }
+        })
+        .catch((error) => this.logger.error('Background translation failed', error))
+    } catch (error) {
+      this.logger.error('Failed to edit message', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to edit message'
+      client.emit('error', { message: errorMessage })
+    }
+  }
+
+  @SubscribeMessage('send_thread_reply')
+  async handleSendThreadReply(
+    @MessageBody() payload: SendThreadReplyPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+
+      return
+    }
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+
+      return
+    }
+
+    if (!payload.content?.trim()) {
+      client.emit('error', { message: 'Message content cannot be empty' })
+
+      return
+    }
+
+    try {
+      const result = await this.chatService.sendThreadReply({
+        roomId,
+        parentId: payload.parentMessageId,
+        userId: user.userId,
+        username: user.username,
+        avatar: user.avatar,
+        content: payload.content.trim(),
+      })
+
+      this.server.to(`room_${roomId}`).emit('thread_reply_new', result)
+
+      // Notify offline members about new unread message
+      this.notifyUnreadUpdate(
+        roomId,
+        room.uuid,
+        user.userId,
+        user.username,
+        payload.content.trim().substring(0, 100),
+        room.name,
+      )
+
+      this.chatService
+        .translateMessage({
+          messageId: result.id,
+          content: result.content,
+          detectedLang: result.detectedLang,
+          roomId,
+        })
+        .then((translations) => {
+          if (Object.keys(translations).length > 0) {
+            this.server
+              .to(`room_${roomId}`)
+              .emit('message_translations_ready', { id: result.id, translations })
+          }
+        })
+        .catch((error) => this.logger.error('Background translation failed', error))
+    } catch (error) {
+      this.logger.error('Failed to send thread reply', error)
+      client.emit('error', { message: 'Failed to send thread reply' })
+    }
+  }
+
+  @SubscribeMessage('toggle_reaction')
+  async handleToggleReaction(
+    @MessageBody() payload: ToggleReactionPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+      return
+    }
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+      return
+    }
+
+    try {
+      const reactions = await this.messageReactionsService.toggle(
+        payload.messageId,
+        user.userId,
+        payload.emoji,
+      )
+
+      this.server
+        .to(`room_${roomId}`)
+        .emit('reaction_updated', { messageId: payload.messageId, reactions })
+    } catch (error) {
+      this.logger.error('Failed to toggle reaction', error)
+      client.emit('error', { message: 'Failed to toggle reaction' })
+    }
+  }
+
+  /**
+   * Returns user IDs currently connected to a room.
+   */
+  private getOnlineUserIdsInRoom(roomId: number): Set<number> {
+    const users = this.roomUsers.get(roomId)
+    if (!users) return new Set()
+
+    return new Set(Array.from(users.values()).map((user) => user.userId))
+  }
+
+  /**
+   * Returns true when a user has no active socket connection to the server.
+   */
+  private isUserOffline(userId: number): boolean {
+    const adapter = this.server.adapter as unknown as { rooms: Map<string, Set<string>> }
+    const userRoom = adapter.rooms.get(`user_${userId}`)
+
+    return !userRoom || userRoom.size === 0
+  }
+
+  /**
+   * Sends unread_update socket event to members not in the room.
+   * Also sends FCM push to members with no active socket connection.
+   * Fire-and-forget — does not block message sending.
+   */
+  private notifyUnreadUpdate(
+    roomId: number,
+    roomUuid: string,
+    senderId: number,
+    senderName: string,
+    messagePreview: string,
+    roomName: string,
+  ): void {
+    this.chatRoomService
+      .getMemberUserIds(roomId)
+      .then(async (memberUserIds) => {
+        const onlineInRoom = this.getOnlineUserIdsInRoom(roomId)
+        const offlineUserIds: number[] = []
+
+        for (const memberUserId of memberUserIds) {
+          if (memberUserId === senderId) continue
+          if (onlineInRoom.has(memberUserId)) continue
+
+          // Send socket event to members connected but viewing other rooms
+          this.server.to(`user_${memberUserId}`).emit('unread_update', { roomUuid })
+
+          // Collect users with no socket connection at all for FCM push
+          if (this.isUserOffline(memberUserId)) {
+            offlineUserIds.push(memberUserId)
+          }
+        }
+
+        this.logger.debug(`[FCM] offlineUserIds: ${offlineUserIds}`)
+
+        if (offlineUserIds.length > 0) {
+          const tokenMap = await this.usersService.getFcmTokensForUsers(offlineUserIds)
+          const tokens = Array.from(tokenMap.values())
+          this.logger.debug(`[FCM] token count: ${tokens.length}`)
+          await this.firebaseService.sendToDevices(
+            tokens,
+            `${senderName} in ${roomName}`,
+            messagePreview,
+            { roomUuid, url: `/chat/${roomUuid}` },
+          )
+        }
+      })
+      .catch((error) => this.logger.error('Failed to notify unread update', error))
+  }
+
+  /**
+   * Sends mention_notification socket event and FCM push to mentioned users.
+   * For direct rooms: notifies the other member.
+   * For channels: notifies only the @mentioned users.
+   * Fire-and-forget — does not block message sending.
+   */
+  private notifyMention(
+    room: { uuid: string; name: string; type: ChatRoomType },
+    roomId: number,
+    sender: RoomUser,
+    contentPreview: string,
+    mentionedUserIds?: number[],
+  ): void {
+    const socketPayload = {
+      roomUuid: room.uuid,
+      roomName: room.name,
+      roomType: room.type,
+      senderName: sender.username,
+      senderAvatar: sender.avatar,
+      contentPreview: contentPreview.substring(0, 100),
+    }
+
+    const notifyUser = async (userId: number) => {
+      this.server.to(`user_${userId}`).emit('mention_notification', socketPayload)
+
+      if (this.isUserOffline(userId)) {
+        const tokenMap = await this.usersService.getFcmTokensForUsers([userId])
+        const token = tokenMap.get(userId)
+
+        if (token) {
+          await this.firebaseService.sendToDevice(
+            token,
+            sender.username,
+            contentPreview.substring(0, 100),
+            { roomUuid: room.uuid, url: `/chat/${room.uuid}` },
+          )
+        }
+      }
+    }
+
+    if (room.type === ChatRoomType.DIRECT) {
+      this.chatRoomService
+        .getMemberUserIds(roomId)
+        .then(async (memberUserIds) => {
+          for (const memberId of memberUserIds) {
+            if (memberId !== sender.userId) {
+              await notifyUser(memberId)
+            }
+          }
+        })
+        .catch((error) => this.logger.error('Failed to notify direct room mention', error))
+    } else if (mentionedUserIds && mentionedUserIds.length > 0) {
+      Promise.all(
+        mentionedUserIds.filter((id) => id !== sender.userId).map((id) => notifyUser(id)),
+      ).catch((error) => this.logger.error('Failed to notify channel mention', error))
+    }
+  }
+}
