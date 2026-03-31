@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm'
 
-export class AddUuidToChatRooms1774797307107 implements MigrationInterface {
+export class AddUuidToChatRooms1774800000003 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`ALTER TABLE chat_rooms ADD COLUMN uuid CHAR(36) NULL`)
     await queryRunner.query(`UPDATE chat_rooms SET uuid = UUID() WHERE uuid IS NULL`)

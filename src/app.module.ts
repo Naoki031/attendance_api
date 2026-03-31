@@ -38,7 +38,7 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, expandVariables: true }),
     ScheduleModule.forRoot(),
     DatabaseModule,
     CountriesModule,

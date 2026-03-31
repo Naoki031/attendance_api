@@ -29,10 +29,8 @@ import { MessageReaction } from '../../modules/message_reactions/entities/messag
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
-const config = databaseConfig[process.env.NODE_ENV]
-
 const options: DataSourceOptions & SeederOptions = {
-  ...config,
+  ...databaseConfig,
   entities: [
     Country,
     City,

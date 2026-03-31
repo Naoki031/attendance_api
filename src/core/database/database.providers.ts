@@ -32,10 +32,8 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
 
   useFactory: async () => {
-    const config = databaseConfig[process.env.NODE_ENV]
-
     return {
-      ...config,
+      ...databaseConfig,
       entities: [
         Country,
         City,

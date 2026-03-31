@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm'
 
-export class AddVisibilityToChatRooms1774776271527 implements MigrationInterface {
+export class AddVisibilityToChatRooms1774800000002 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.addColumn(
       'chat_rooms',
