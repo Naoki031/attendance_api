@@ -42,7 +42,7 @@ export class CreateUsersTable1727623410759 implements MigrationInterface {
             name: 'phone_number',
             type: 'varchar',
             length: '20',
-            isNullable: false,
+            isNullable: true,
           },
           {
             name: 'email',

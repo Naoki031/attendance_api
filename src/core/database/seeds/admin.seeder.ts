@@ -14,7 +14,7 @@ export default class AdminSeeder implements Seeder {
         last_name: 'Nguyen',
         position: 'Leader',
         phone_number: '0909090909',
-        email: 'admin@gmail.com',
+        email: 'admin@example.com',
         address: 'HCMC',
         password: await hash('password', 10),
         is_activated: true,
