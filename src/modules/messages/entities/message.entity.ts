@@ -1,12 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm'
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm'
 import { User } from '@/modules/users/entities/user.entity'
 
 @Entity('messages')
@@ -43,9 +35,9 @@ export class Message {
   @JoinColumn({ name: 'parent_id' })
   parent?: Message | null
 
-  @CreateDateColumn({ name: 'created_at' })
+  @Column({ name: 'created_at', type: 'datetime' })
   created_at: Date
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @Column({ name: 'updated_at', type: 'datetime' })
   updated_at: Date
 }

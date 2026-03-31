@@ -19,12 +19,15 @@ export class MessagesService {
     detectedLang: string
     parentId?: number | null
   }): Promise<Message> {
+    const now = new Date()
     const message = this.messageRepository.create({
       room_id: data.roomId,
       user_id: data.userId,
       content: data.content,
       detected_lang: data.detectedLang,
       parent_id: data.parentId ?? null,
+      created_at: now,
+      updated_at: now,
     })
 
     return this.messageRepository.save(message)
@@ -121,6 +124,7 @@ export class MessagesService {
     message.previous_content = data.previousContent
     message.content = data.content
     message.is_edited = true
+    message.updated_at = new Date()
 
     return this.messageRepository.save(message)
   }
