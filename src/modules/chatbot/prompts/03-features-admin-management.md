@@ -33,3 +33,6 @@ order: 35
 **Integrations:**
 - **Slack Channels**: Configure Slack webhooks for request notifications. Each channel can optionally attach a clickable link to the **Approvals page** and/or the **My Requests page** in the notification message (toggle "Include link to Approvals page" / "Include link to My Requests page" in the channel settings). When writing a **Message Template**, only variables relevant to the selected feature type are shown — e.g. `leave_type` only appears for OFF, `equipment_name` only for Equipment. Available variables include `cc_users` (mentions CC'd colleagues) for all request types
 - **Google Sheets**: Configure Google Sheets integration per request type or for attendance logs (column mapping, spreadsheet ID, sheet name). Supported types: WFH, OFF, Equipment, Clock Forget, Overtime, and Attendance Logs.
+
+**Settings:**
+- **System Settings**: Admin-only configuration panel. Currently includes the **Chatbot** section where you can reload chatbot prompt files from disk without restarting the server (useful after editing prompt markdown files). Click **"Reload"** to refresh all prompt sections immediately.
