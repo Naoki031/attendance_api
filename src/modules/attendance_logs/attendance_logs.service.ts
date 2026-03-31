@@ -99,6 +99,16 @@ export class AttendanceLogsService {
    * OT requests can include weekends, so they are checked separately.
    */
   private async checkIsWfhToday(userId: number, today: string): Promise<boolean> {
+    // Permanent remote users can always clock in/out manually — no QR needed
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['permanent_remote'],
+    })
+
+    if (user?.permanent_remote) {
+      return true
+    }
+
     const dayOfWeek = new Date(today).getDay()
 
     // Check OT requests first (can include Saturdays and Sundays)
@@ -145,6 +155,7 @@ export class AttendanceLogsService {
       const toDate = request.to_datetime
         ? new Date(request.to_datetime).toISOString().substring(0, 10)
         : fromDate
+
       return fromDate <= today && today <= toDate
     })
   }
