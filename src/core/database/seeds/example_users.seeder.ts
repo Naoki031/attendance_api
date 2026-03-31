@@ -4,7 +4,7 @@ import { Seeder, SeederFactoryManager } from 'typeorm-extension'
 import { User } from '../../../modules/users/entities/user.entity'
 
 export default class ExampleUsersSeeder implements Seeder {
-  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<void> {
     const repository = dataSource.getRepository(User)
     const passwordHash = await hash('password', 10)
 

@@ -33,7 +33,7 @@ export class AuthService {
    * @returns A promise that resolves to the authenticated user object.
    * @throws {UnauthorizedException} If credentials are invalid.
    */
-  async validateUser(email: string, password: string): Promise<any> {
+  async validateUser(email: string, password: string): Promise<User> {
     const user = await this.usersService.findOneByEmail(email)
 
     if (!user) {

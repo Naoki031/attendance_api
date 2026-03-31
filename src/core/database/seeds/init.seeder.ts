@@ -7,7 +7,7 @@ import AdminSeeder from './admin.seeder'
 import PermissionGroupSeeder from './permission_group.seeder'
 import UserGroupPermissionSeeder from './user_group_permission.seeder'
 export default class InitSeeder implements Seeder {
-  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<void> {
     await runSeeders(dataSource, {
       seeds: [
         CountrySeeder,

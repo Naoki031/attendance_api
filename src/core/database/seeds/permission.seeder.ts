@@ -3,7 +3,7 @@ import { Seeder, SeederFactoryManager } from 'typeorm-extension'
 import { Permission } from '../../../modules/permissions/entities/permission.entity'
 
 export default class PermissionSeeder implements Seeder {
-  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<void> {
     const repository = dataSource.getRepository(Permission)
 
     await repository.insert([

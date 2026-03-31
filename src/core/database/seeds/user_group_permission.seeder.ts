@@ -3,7 +3,7 @@ import { Seeder, SeederFactoryManager } from 'typeorm-extension'
 import { UserGroupPermission } from '../../../modules/user_group_permissions/entities/user_group_permission.entity'
 
 export default class UserGroupPermissionSeeder implements Seeder {
-  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<any> {
+  public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<void> {
     const repository = dataSource.getRepository(UserGroupPermission)
 
     await repository.insert([

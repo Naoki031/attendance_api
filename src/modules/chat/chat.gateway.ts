@@ -432,6 +432,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!room) {
       client.emit('error', { message: 'Room not found' })
+
       return
     }
 
