@@ -471,7 +471,7 @@ export class ChatRoomService {
    */
   async getUnreadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
     const results = await this.chatRoomMemberRepository.query(
-      `SELECT m.id, m.content, m.created_at,
+      `SELECT m.id, m.content, m.created_at, m.parent_id AS parentId,
               cr.uuid AS roomUuid, cr.name AS roomName, cr.type AS roomType,
               m.user_id AS senderId,
               CONCAT(u.first_name, ' ', u.last_name) AS senderName,
@@ -493,6 +493,7 @@ export class ChatRoomService {
       id: Number(row.id),
       content: String(row.content),
       createdAt: row.created_at,
+      parentId: row.parentId ? Number(row.parentId) : null,
       roomUuid: String(row.roomUuid),
       roomName: String(row.roomName),
       roomType: String(row.roomType),
@@ -537,6 +538,7 @@ export interface UnreadMessageResult {
   id: number
   content: string
   createdAt: Date
+  parentId: number | null
   roomUuid: string
   roomName: string
   roomType: string
