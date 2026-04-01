@@ -47,6 +47,11 @@ export class ChatRoomController {
     return this.chatRoomService.getUnreadMessages(user.id)
   }
 
+  @Get('read-messages')
+  async getRecentReadMessages(@User() user: UserEntity) {
+    return this.chatRoomService.getRecentReadMessages(user.id)
+  }
+
   @Get(':uuid')
   async findOne(@Param('uuid') uuid: string, @User() user: UserEntity) {
     return this.chatRoomService.findByUuid(uuid, user.id)

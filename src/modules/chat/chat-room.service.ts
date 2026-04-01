@@ -165,6 +165,22 @@ export class ChatRoomService {
 
     const rooms = memberships.map((membership) => membership.room!).filter(Boolean)
 
+    // Fetch member counts for all rooms in one query
+    const roomIds = rooms.map((room) => room.id)
+    const memberCountMap = new Map<number, number>()
+
+    if (roomIds.length > 0) {
+      const countRows: { room_id: number; count: string }[] =
+        await this.chatRoomMemberRepository.query(
+          `SELECT room_id, COUNT(*) as count FROM chat_room_members WHERE room_id IN (${roomIds.map(() => '?').join(',')}) GROUP BY room_id`,
+          roomIds,
+        )
+
+      for (const row of countRows) {
+        memberCountMap.set(Number(row.room_id), Number(row.count))
+      }
+    }
+
     // For direct rooms, attach the other user as direct_user
     const directRoomIds = rooms
       .filter((room) => room.type === ChatRoomType.DIRECT)
@@ -192,13 +208,15 @@ export class ChatRoomService {
       }
     }
 
-    // Convert to plain objects and attach direct_user
+    // Convert to plain objects and attach direct_user + member_count
     return rooms.map((room) => {
       const plain = instanceToPlain(room) as Record<string, unknown>
 
       if (room.type === ChatRoomType.DIRECT) {
         plain.direct_user = directUserMap.get(room.id) ?? null
       }
+
+      plain.member_count = memberCountMap.get(room.id) ?? 0
 
       return plain
     })
@@ -207,12 +225,28 @@ export class ChatRoomService {
   /**
    * Returns all public rooms (for discovery).
    */
-  async findPublicRooms(): Promise<ChatRoom[]> {
-    return this.chatRoomRepository.find({
+  async findPublicRooms() {
+    const rooms = await this.chatRoomRepository.find({
       where: { visibility: ChatRoomVisibility.PUBLIC },
       relations: ['creator'],
       order: { created_at: 'DESC' },
     })
+
+    if (rooms.length === 0) return rooms
+
+    const roomIds = rooms.map((room) => room.id)
+    const countRows: { room_id: number; count: string }[] =
+      await this.chatRoomMemberRepository.query(
+        `SELECT room_id, COUNT(*) as count FROM chat_room_members WHERE room_id IN (${roomIds.map(() => '?').join(',')}) GROUP BY room_id`,
+        roomIds,
+      )
+
+    const memberCountMap = new Map(countRows.map((row) => [Number(row.room_id), Number(row.count)]))
+
+    return rooms.map((room) => ({
+      ...instanceToPlain(room),
+      member_count: memberCountMap.get(room.id) ?? 0,
+    }))
   }
 
   /**
@@ -467,6 +501,44 @@ export class ChatRoomService {
   }
 
   /**
+   * Returns recent read messages from other users across all rooms.
+   */
+  async getRecentReadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
+    const results = await this.chatRoomMemberRepository.query(
+      `SELECT m.id, m.content, m.created_at, m.parent_id AS parentId,
+              cr.uuid AS roomUuid, cr.name AS roomName, cr.type AS roomType,
+              m.user_id AS senderId,
+              CONCAT(u.first_name, ' ', u.last_name) AS senderName,
+              u.avatar AS senderAvatar
+       FROM chat_room_members crm
+       JOIN chat_rooms cr ON cr.id = crm.room_id
+       JOIN messages m ON m.room_id = cr.id
+         AND m.user_id != ?
+         AND crm.last_read_at IS NOT NULL
+         AND m.created_at <= crm.last_read_at
+       JOIN users u ON u.id = m.user_id
+       WHERE crm.user_id = ?
+         AND cr.deleted_at IS NULL
+       ORDER BY m.created_at DESC
+       LIMIT ?`,
+      [userId, userId, limit],
+    )
+
+    return results.map((row: Record<string, unknown>) => ({
+      id: Number(row.id),
+      content: String(row.content),
+      createdAt: new Date(row.created_at as string | Date).toISOString(),
+      parentId: row.parentId ? Number(row.parentId) : null,
+      roomUuid: String(row.roomUuid),
+      roomName: String(row.roomName),
+      roomType: String(row.roomType),
+      senderId: Number(row.senderId),
+      senderName: String(row.senderName),
+      senderAvatar: (row.senderAvatar as string) ?? null,
+    }))
+  }
+
+  /**
    * Returns recent unread messages from other users across all rooms.
    */
   async getUnreadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
@@ -492,7 +564,7 @@ export class ChatRoomService {
     return results.map((row: Record<string, unknown>) => ({
       id: Number(row.id),
       content: String(row.content),
-      createdAt: row.created_at,
+      createdAt: new Date(row.created_at as string | Date).toISOString(),
       parentId: row.parentId ? Number(row.parentId) : null,
       roomUuid: String(row.roomUuid),
       roomName: String(row.roomName),

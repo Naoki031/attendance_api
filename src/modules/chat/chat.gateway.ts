@@ -56,6 +56,7 @@ interface SendThreadReplyPayload {
   roomUuid: string
   parentMessageId: number
   content: string
+  mentionedUserIds?: number[]
 }
 
 interface ToggleReactionPayload {
@@ -252,7 +253,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(`room_${roomId}`).emit('message_new', result)
 
-      // Notify offline members about new unread message
+      // Notify targeted members about new unread message
       this.notifyUnreadUpdate(
         roomId,
         room.uuid,
@@ -260,10 +261,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         user.username,
         content.substring(0, 100),
         room.name,
+        room.type,
+        payload.mentionedUserIds,
       )
 
       // Send mention notifications
-      this.notifyMention(room, roomId, user, content.trim(), payload.mentionedUserIds)
+      this.notifyMention(room, roomId, user, content.trim(), payload.mentionedUserIds, result)
 
       // Translate in background — no await
       this.chatService
@@ -392,7 +395,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(`room_${roomId}`).emit('thread_reply_new', result)
 
-      // Notify offline members about new unread message
+      // Notify targeted members about new unread message
       this.notifyUnreadUpdate(
         roomId,
         room.uuid,
@@ -400,6 +403,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         user.username,
         payload.content.trim().substring(0, 100),
         room.name,
+        room.type,
+        payload.mentionedUserIds,
+      )
+
+      // Send mention notifications for thread replies
+      this.notifyMention(
+        room,
+        roomId,
+        user,
+        payload.content.trim(),
+        payload.mentionedUserIds,
+        result,
       )
 
       this.chatService
@@ -482,8 +497,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Sends unread_update socket event to members not in the room.
+   * Sends unread_update socket event to targeted members not in the room.
    * Also sends FCM push to members with no active socket connection.
+   * DIRECT rooms: notify the other member.
+   * CHANNEL rooms: only notify @mentioned users.
    * Fire-and-forget — does not block message sending.
    */
   private notifyUnreadUpdate(
@@ -493,6 +510,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     senderName: string,
     messagePreview: string,
     roomName: string,
+    roomType: ChatRoomType,
+    mentionedUserIds?: number[],
   ): void {
     this.chatRoomService
       .getMemberUserIds(roomId)
@@ -500,16 +519,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const onlineInRoom = this.getOnlineUserIdsInRoom(roomId)
         const offlineUserIds: number[] = []
 
-        for (const memberUserId of memberUserIds) {
-          if (memberUserId === senderId) continue
-          if (onlineInRoom.has(memberUserId)) continue
+        // DIRECT: notify other member. CHANNEL: only notify mentioned users.
+        const targetUserIds =
+          roomType === ChatRoomType.DIRECT
+            ? memberUserIds.filter((id) => id !== senderId)
+            : (mentionedUserIds ?? []).filter((id) => id !== senderId)
+
+        for (const targetUserId of targetUserIds) {
+          if (onlineInRoom.has(targetUserId)) continue
 
           // Send socket event to members connected but viewing other rooms
-          this.server.to(`user_${memberUserId}`).emit('unread_update', { roomUuid })
+          this.server.to(`user_${targetUserId}`).emit('unread_update', { roomUuid })
 
           // Collect users with no socket connection at all for FCM push
-          if (this.isUserOffline(memberUserId)) {
-            offlineUserIds.push(memberUserId)
+          if (this.isUserOffline(targetUserId)) {
+            offlineUserIds.push(targetUserId)
           }
         }
 
@@ -541,15 +565,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     roomId: number,
     sender: RoomUser,
     contentPreview: string,
-    mentionedUserIds?: number[],
+    mentionedUserIds: number[] | undefined,
+    messageData?: { id: number; parentId: number | null; createdAt: Date },
   ): void {
     const socketPayload = {
       roomUuid: room.uuid,
       roomName: room.name,
       roomType: room.type,
+      senderId: sender.userId,
       senderName: sender.username,
       senderAvatar: sender.avatar,
       contentPreview: contentPreview.substring(0, 100),
+      messageId: messageData?.id,
+      messageParentId: messageData?.parentId ?? null,
+      messageCreatedAt: messageData?.createdAt,
     }
 
     const notifyUser = async (userId: number) => {

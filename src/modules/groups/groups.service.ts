@@ -26,8 +26,20 @@ export class GroupsService {
   /**
    * Retrieves all groups with member count.
    */
-  async findAll(): Promise<Group[]> {
-    return this.groupRepository.find()
+  async findAll() {
+    const groups = await this.groupRepository.find()
+
+    if (groups.length === 0) return groups
+
+    const groupIds = groups.map((group) => group.id)
+    const countRows: { group_id: number; count: string }[] = await this.userGroupRepository.query(
+      `SELECT group_id, COUNT(*) as count FROM user_groups WHERE group_id IN (${groupIds.map(() => '?').join(',')}) GROUP BY group_id`,
+      groupIds,
+    )
+
+    const countMap = new Map(countRows.map((row) => [Number(row.group_id), Number(row.count)]))
+
+    return groups.map((group) => ({ ...group, member_count: countMap.get(group.id) ?? 0 }))
   }
 
   /**

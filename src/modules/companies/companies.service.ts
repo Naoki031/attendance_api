@@ -46,12 +46,31 @@ export class CompaniesService {
   }
 
   /**
+   * Fetches user counts per company from user_departments table.
+   */
+  private async fetchUserCountMap(companyIds: number[]): Promise<Map<number, number>> {
+    if (companyIds.length === 0) return new Map()
+
+    const rows: { company_id: number; count: string }[] = await this.companyRepository.query(
+      `SELECT company_id, COUNT(DISTINCT user_id) as count FROM user_departments WHERE company_id IN (${companyIds.map(() => '?').join(',')}) GROUP BY company_id`,
+      companyIds,
+    )
+
+    return new Map(rows.map((row) => [Number(row.company_id), Number(row.count)]))
+  }
+
+  /**
    * Retrieves all companies from the repository.
    *
    * @returns A promise that resolves to an array of companies.
    */
-  async findAll(): Promise<Company[]> {
-    return this.companyRepository.find({ relations: ['country', 'city'] })
+  async findAll() {
+    const companies = await this.companyRepository.find({ relations: ['country', 'city'] })
+    const countMap = await this.fetchUserCountMap(
+      companies.map((company) => company.id!).filter(Boolean),
+    )
+
+    return companies.map((company) => ({ ...company, user_count: countMap.get(company.id!) ?? 0 }))
   }
 
   /**
@@ -60,7 +79,7 @@ export class CompaniesService {
    * @param {CompanyFilters} filters - The filter criteria.
    * @returns A promise that resolves to an array of matching companies.
    */
-  async findWithFilters(filters: CompanyFilters): Promise<Company[]> {
+  async findWithFilters(filters: CompanyFilters) {
     const queryBuilder = this.companyRepository
       .createQueryBuilder('company')
       .leftJoinAndSelect('company.country', 'country')
@@ -82,7 +101,12 @@ export class CompaniesService {
       queryBuilder.andWhere('company.city_id = :cityId', { cityId: filters.cityId })
     }
 
-    return queryBuilder.getMany()
+    const companies = await queryBuilder.getMany()
+    const countMap = await this.fetchUserCountMap(
+      companies.map((company) => company.id!).filter(Boolean),
+    )
+
+    return companies.map((company) => ({ ...company, user_count: countMap.get(company.id!) ?? 0 }))
   }
 
   /**

@@ -27,12 +27,32 @@ export class DepartmentsService {
   }
 
   /**
+   * Fetches user counts per department from user_departments table.
+   */
+  private async fetchUserCountMap(departmentIds: number[]): Promise<Map<number, number>> {
+    if (departmentIds.length === 0) return new Map()
+
+    const rows: { department_id: number; count: string }[] = await this.departmentRepository.query(
+      `SELECT department_id, COUNT(DISTINCT user_id) as count FROM user_departments WHERE department_id IN (${departmentIds.map(() => '?').join(',')}) GROUP BY department_id`,
+      departmentIds,
+    )
+
+    return new Map(rows.map((row) => [Number(row.department_id), Number(row.count)]))
+  }
+
+  /**
    * Retrieves all department entries.
    *
    * @returns A promise that resolves to an array of departments.
    */
-  async findAll(): Promise<Department[]> {
-    return this.departmentRepository.find()
+  async findAll() {
+    const departments = await this.departmentRepository.find()
+    const countMap = await this.fetchUserCountMap(departments.map((department) => department.id))
+
+    return departments.map((department) => ({
+      ...department,
+      user_count: countMap.get(department.id) ?? 0,
+    }))
   }
 
   /**
@@ -41,7 +61,7 @@ export class DepartmentsService {
    * @param {DepartmentFilters} filters - The filter criteria.
    * @returns A promise that resolves to an array of matching departments.
    */
-  async findWithFilters(filters: DepartmentFilters): Promise<Department[]> {
+  async findWithFilters(filters: DepartmentFilters) {
     const queryBuilder = this.departmentRepository.createQueryBuilder('department')
 
     if (filters.search) {
@@ -52,7 +72,13 @@ export class DepartmentsService {
       )
     }
 
-    return queryBuilder.getMany()
+    const departments = await queryBuilder.getMany()
+    const countMap = await this.fetchUserCountMap(departments.map((department) => department.id))
+
+    return departments.map((department) => ({
+      ...department,
+      user_count: countMap.get(department.id) ?? 0,
+    }))
   }
 
   /**
