@@ -1,7 +1,10 @@
 import {
+  BadRequestException,
+  ForbiddenException,
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Put,
   Param,
@@ -9,13 +12,21 @@ import {
   Query,
   ClassSerializerInterceptor,
   UseInterceptors,
+  UseGuards,
   ValidationPipe,
+  ParseIntPipe,
+  UploadedFile,
 } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { memoryStorage } from 'multer'
 import { UsersService } from './users.service'
 import { CreateUserDto } from './dto/create-user.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto'
+import { ReviewKycDto } from './dto/review-kyc.dto'
 import { User } from '@/modules/auth/decorators/user.decorator'
+import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
+import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
 import type { User as UserEntity } from '@/modules/users/entities/user.entity'
 
 @Controller('users')
@@ -40,6 +51,7 @@ export class UsersController {
     @Query('role') role?: string,
     @Query('status') status?: string,
     @Query('contract_type') contractType?: string,
+    @Query('kyc_status') kycStatus?: string,
   ) {
     if (search) {
       return this.usersService.search(search)
@@ -54,7 +66,8 @@ export class UsersController {
       companyId ||
       role ||
       status ||
-      contractType
+      contractType ||
+      kycStatus
 
     if (hasFilter) {
       return this.usersService.findWithFilters({
@@ -67,6 +80,7 @@ export class UsersController {
         role,
         status,
         contractType,
+        kycStatus,
       })
     }
 
@@ -88,12 +102,72 @@ export class UsersController {
     return this.usersService.remove(+userId)
   }
 
+  @Post(':id/face')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_request, file, callback) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp']
+
+        if (!allowed.includes(file.mimetype)) {
+          return callback(
+            new BadRequestException('Only JPEG, PNG, or WEBP images are allowed'),
+            false,
+          )
+        }
+
+        callback(null, true)
+      },
+    }),
+  )
+  async registerFace(
+    @Param('id', ParseIntPipe) userId: number,
+    @User() currentUser: UserEntity,
+    @UploadedFile() imageFile: Express.Multer.File,
+    @Body('descriptor') descriptorJson: string,
+  ) {
+    const isAdmin =
+      currentUser.roles?.includes('admin') || currentUser.roles?.includes('super_admin')
+
+    if (currentUser.id !== userId && !isAdmin) {
+      throw new ForbiddenException('You can only register your own face')
+    }
+
+    if (!imageFile) throw new BadRequestException('Image file is required')
+
+    let descriptor: number[]
+
+    try {
+      descriptor = JSON.parse(descriptorJson)
+    } catch {
+      throw new BadRequestException('descriptor must be a valid JSON array')
+    }
+
+    return this.usersService.registerFace(userId, descriptor, imageFile)
+  }
+
+  @Patch(':id/kyc')
+  @UseGuards(PermissionsGuard)
+  @Permissions('update')
+  reviewKyc(@Param('id', ParseIntPipe) userId: number, @Body(ValidationPipe) dto: ReviewKycDto) {
+    return this.usersService.reviewKyc(userId, dto.status, dto.rejection_reason)
+  }
+
+  @Delete(':id/kyc')
+  @UseGuards(PermissionsGuard)
+  @Permissions('update')
+  cancelKyc(@Param('id', ParseIntPipe) userId: number): Promise<void> {
+    return this.usersService.cancelKyc(userId)
+  }
+
   @Post('me/fcm-token')
   async updateFcmToken(
     @Body(ValidationPipe) dto: UpdateFcmTokenDto,
     @User() user: UserEntity,
   ): Promise<{ success: boolean }> {
     await this.usersService.updateFcmToken(user.id, dto.fcm_token)
+
     return { success: true }
   }
 }

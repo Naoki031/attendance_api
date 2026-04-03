@@ -12,6 +12,8 @@ import { Company } from '@/modules/companies/entities/company.entity'
 import { User } from '@/modules/users/entities/user.entity'
 import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_work_schedule.entity'
 import { GoogleSheetsModule } from '@/modules/google_sheets/google_sheets.module'
+import { FaceModule } from '@/modules/face/face.module'
+import { StorageModule } from '@/modules/storage/storage.module'
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { GoogleSheetsModule } from '@/modules/google_sheets/google_sheets.module
     UserGroupPermissionsModule,
     ConfigModule,
     GoogleSheetsModule,
+    FaceModule,
+    StorageModule,
   ],
   controllers: [AttendanceLogsController],
   providers: [AttendanceLogsService],

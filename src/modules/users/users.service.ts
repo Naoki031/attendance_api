@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as bcrypt from 'bcrypt'
@@ -6,6 +12,8 @@ import { User } from './entities/user.entity'
 import { CreateUserDto } from './dto/create-user.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
+import { StorageService } from '@/modules/storage/storage.service'
+import { FirebaseService } from '@/modules/firebase/firebase.service'
 
 @Injectable()
 export class UsersService {
@@ -14,6 +22,8 @@ export class UsersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserGroupPermission)
     private readonly userGroupPermissionRepository: Repository<UserGroupPermission>,
+    private readonly storageService: StorageService,
+    private readonly firebaseService: FirebaseService,
   ) {}
 
   /**
@@ -87,6 +97,7 @@ export class UsersService {
     role?: string
     status?: string
     contractType?: string
+    kycStatus?: string
   }): Promise<User[]> {
     const queryBuilder = this.userRepository
       .createQueryBuilder('user')
@@ -156,6 +167,16 @@ export class UsersService {
       queryBuilder.andWhere('LOWER(user.contract_type) LIKE :contractType', {
         contractType: `%${parameters.contractType.toLowerCase()}%`,
       })
+    }
+
+    if (
+      parameters.kycStatus === 'pending' ||
+      parameters.kycStatus === 'approved' ||
+      parameters.kycStatus === 'rejected'
+    ) {
+      queryBuilder.andWhere('user.kyc_status = :kycStatus', { kycStatus: parameters.kycStatus })
+    } else if (parameters.kycStatus === 'none') {
+      queryBuilder.andWhere('user.kyc_status IS NULL')
     }
 
     return queryBuilder.getMany()
@@ -248,13 +269,13 @@ export class UsersService {
   async update(userId: number, updateUserDto: UpdateUserDto): Promise<User> {
     if (updateUserDto.email) {
       const existing = await this.userRepository.findOne({ where: { email: updateUserDto.email } })
+
       if (existing && existing.id !== userId) {
         throw new ConflictException('Email already taken')
       }
     }
 
     const { is_active, password, permission_group_ids, ...rest } = updateUserDto
-
     const updateData: Partial<User> = { ...rest }
 
     if (password) {
@@ -308,6 +329,140 @@ export class UsersService {
    */
   async updateFcmToken(userId: number, token: string): Promise<void> {
     await this.userRepository.update({ id: userId }, { fcm_token: token })
+  }
+
+  /**
+   * Registers a face descriptor and avatar image for a user.
+   * Validates descriptor length (must be exactly 128 elements), uploads the
+   * image to S3, then persists descriptor and avatar URL on the user record.
+   *
+   * @param userId - Target user ID
+   * @param descriptor - 128-element float array from face-api.js
+   * @param imageFile - Avatar image file from multipart upload
+   * @returns Updated user (descriptor field excluded from response)
+   */
+  async registerFace(
+    userId: number,
+    descriptor: number[],
+    imageFile: Express.Multer.File,
+  ): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id: userId } })
+    if (!user) throw new NotFoundException('User not found')
+
+    if (user.kyc_status === 'approved') {
+      throw new ForbiddenException('KYC is already approved and cannot be re-submitted')
+    }
+
+    if (!Array.isArray(descriptor) || descriptor.length !== 128) {
+      throw new BadRequestException('Face descriptor must be an array of exactly 128 numbers')
+    }
+
+    const avatarUrl = await this.storageService.uploadImage(imageFile.buffer, 'avatars', userId)
+
+    await this.userRepository.update(
+      { id: userId },
+      {
+        face_descriptor: descriptor,
+        face_avatar_url: avatarUrl,
+        kyc_status: 'pending',
+        kyc_rejection_reason: null,
+      },
+    )
+
+    const updatedUser = await this.findOne(userId)
+
+    // Notify admins of the new KYC submission (fire-and-forget)
+    void this.notifyAdminsKycSubmitted(user)
+
+    return updatedUser
+  }
+
+  /**
+   * Cancels a pending or rejected KYC submission, resetting the user's status to null.
+   * Used by admins to allow the user to re-submit KYC.
+   */
+  async cancelKyc(userId: number): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } })
+    if (!user) throw new NotFoundException('User not found')
+
+    if (!user.kyc_status) {
+      throw new BadRequestException('Cannot cancel KYC: no submission found')
+    }
+
+    await this.userRepository.update(
+      { id: userId },
+      { kyc_status: null, kyc_rejection_reason: null },
+    )
+  }
+
+  /**
+   * Retrieves FCM tokens of all admin and super_admin users.
+   */
+  private async getAdminFcmTokens(): Promise<string[]> {
+    const admins = await this.userRepository
+      .createQueryBuilder('user')
+      .innerJoin('user.user_group_permissions', 'ugp')
+      .innerJoin('ugp.permission_group', 'pg')
+      .where('LOWER(pg.name) IN (:...roles)', { roles: ['admin', 'super_admin'] })
+      .andWhere('user.fcm_token IS NOT NULL')
+      .select(['user.id', 'user.fcm_token'])
+      .getMany()
+
+    return admins.map((admin) => admin.fcm_token!).filter(Boolean)
+  }
+
+  /**
+   * Sends a push notification to all admin users when a KYC submission is received.
+   */
+  private async notifyAdminsKycSubmitted(submittingUser: User): Promise<void> {
+    try {
+      const adminTokens = await this.getAdminFcmTokens()
+      if (adminTokens.length === 0) return
+
+      const userName =
+        [submittingUser.first_name, submittingUser.last_name].filter(Boolean).join(' ') ||
+        submittingUser.email
+
+      await this.firebaseService.sendToDevices(
+        adminTokens,
+        'New KYC Submission',
+        `${userName} has submitted a KYC request for review.`,
+        { url: '/management/kyc', type: 'kyc_submission' },
+      )
+    } catch {
+      // FCM errors must not affect the KYC flow
+    }
+  }
+
+  /**
+   * Admin reviews a pending KYC submission.
+   * Approved → face is activated for attendance check-in.
+   * Rejected → user must re-submit KYC; rejection reason is stored.
+   */
+  async reviewKyc(
+    userId: number,
+    status: 'approved' | 'rejected',
+    rejectionReason?: string,
+  ): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id: userId } })
+    if (!user) throw new NotFoundException('User not found')
+    if (!user.face_descriptor) throw new BadRequestException('User has not submitted KYC')
+
+    if (user.kyc_status !== 'pending') {
+      throw new BadRequestException(
+        `KYC status is '${user.kyc_status}', only 'pending' can be reviewed`,
+      )
+    }
+
+    await this.userRepository.update(
+      { id: userId },
+      {
+        kyc_status: status,
+        kyc_rejection_reason: status === 'rejected' ? (rejectionReason ?? null) : null,
+      },
+    )
+
+    return this.findOne(userId)
   }
 
   /**

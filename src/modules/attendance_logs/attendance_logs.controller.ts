@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -8,9 +9,13 @@ import {
   Param,
   Req,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ValidationPipe,
   ParseIntPipe,
 } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { memoryStorage } from 'multer'
 import { Request } from 'express'
 import { IsString, IsNumber } from 'class-validator'
 import { AttendanceLogsService } from './attendance_logs.service'
@@ -130,6 +135,83 @@ export class AttendanceLogsController {
   @Permissions('read')
   getEditHistory(@Param('id', ParseIntPipe) id: number) {
     return this.attendanceLogsService.getEditHistory(id)
+  }
+
+  /**
+   * Face-based check-in/out: matches the submitted descriptor against registered employees,
+   * uploads the captured photo, and records the attendance event.
+   */
+  @Post('face/checkin')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_request, file, callback) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp']
+
+        if (!allowed.includes(file.mimetype)) {
+          return callback(
+            new BadRequestException('Only JPEG, PNG, or WEBP images are allowed'),
+            false,
+          )
+        }
+
+        callback(null, true)
+      },
+    }),
+  )
+  async faceCheckin(
+    @UploadedFile() imageFile: Express.Multer.File,
+    @Body('descriptor') descriptorJson: string,
+    @Body('location') location: string | undefined,
+    @Req() request: Request,
+  ) {
+    if (!imageFile) throw new BadRequestException('Image file is required')
+
+    let descriptor: number[]
+
+    try {
+      descriptor = JSON.parse(descriptorJson)
+    } catch {
+      throw new BadRequestException('descriptor must be a valid JSON array')
+    }
+
+    const xRealIp = request.headers['x-real-ip'] as string | undefined
+    const xForwarded = request.headers['x-forwarded-for'] as string | undefined
+    const clientIp =
+      xRealIp?.trim() ||
+      (xForwarded ? xForwarded.split(',').slice(-1)[0].trim() : '') ||
+      (request.ip ?? '')
+
+    const deviceInfo = (request.headers['user-agent'] as string | undefined) ?? ''
+
+    return this.attendanceLogsService.faceCheckin(
+      descriptor,
+      imageFile,
+      clientIp,
+      deviceInfo,
+      location,
+    )
+  }
+
+  /**
+   * Returns attendance logs for a given date (defaults to today).
+   */
+  @Get('history')
+  @Permissions('read')
+  getHistory(@Query('date') date?: string) {
+    const target = date ?? new Date().toISOString().substring(0, 10)
+
+    return this.attendanceLogsService.getByDate(target)
+  }
+
+  /**
+   * Returns today's attendance summary counts.
+   */
+  @Get('stats/today')
+  @Permissions('read')
+  getTodayStats() {
+    return this.attendanceLogsService.getTodayStats()
   }
 
   /**

@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { PromptSection, PromptRole, DataContext } from './types'
@@ -35,6 +36,8 @@ export class PromptBuilderService implements OnModuleInit {
   private sections: PromptSection[] = []
   private assembledPrompts: Map<string, string> = new Map()
   private defaultTone: string = 'professional'
+
+  constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
     await this.loadSections()
@@ -139,8 +142,15 @@ export class PromptBuilderService implements OnModuleInit {
     const { tone, language, isAdmin, dataContext } = options
     const role: PromptRole = isAdmin ? 'admin' : 'employee'
     const resolvedTone = tone && TONE_INSTRUCTIONS[tone] ? tone : this.defaultTone
+    const chatbotName = this.configService.get<string>('CHATBOT_NAME')
 
     let prompt = this.getBasePrompt(role) + (TONE_INSTRUCTIONS[resolvedTone] ?? '')
+
+    if (chatbotName) {
+      prompt =
+        `Your name is "${chatbotName}". When users ask your name, introduce yourself as ${chatbotName}.\n\n` +
+        prompt
+    }
 
     if (language) {
       prompt += `\n\nIMPORTANT: The user is communicating in ${language}. You MUST respond in ${language} only. Do not switch languages.`

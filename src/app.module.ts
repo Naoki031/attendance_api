@@ -32,6 +32,9 @@ import { ChatModule } from './modules/chat/chat.module'
 import { MessagesModule } from './modules/messages/messages.module'
 import { FirebaseModule } from './modules/firebase/firebase.module'
 import { MessageReactionsModule } from './modules/message_reactions/message-reactions.module'
+import { StorageModule } from './modules/storage/storage.module'
+import { FaceModule } from './modules/face/face.module'
+import { FeaturesModule } from './modules/features/features.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
 import { APP_GUARD } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
@@ -67,6 +70,9 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
     MessagesModule,
     FirebaseModule,
     MessageReactionsModule,
+    StorageModule,
+    FaceModule,
+    FeaturesModule,
     // EmployeesModule,
   ],
   providers: [

@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { Between, IsNull, LessThanOrEqual, Or, Repository } from 'typeorm'
 import * as crypto from 'crypto'
+import * as momentTimezone from 'moment-timezone'
 import { Cron } from '@nestjs/schedule'
 import { ConfigService } from '@nestjs/config'
 import { AttendanceLog, ScheduleType } from './entities/attendance_log.entity'
@@ -25,6 +26,18 @@ import { User } from '@/modules/users/entities/user.entity'
 import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_work_schedule.entity'
 import { GoogleSheetsService } from '@/modules/google_sheets/google_sheets.service'
 import type { ColumnConfigItem } from '@/modules/google_sheets/entities/company_google_sheet.entity'
+import { FaceService } from '@/modules/face/face.service'
+import { StorageService } from '@/modules/storage/storage.service'
+
+export interface FaceCheckinResult {
+  success: boolean
+  type: 'clock_in' | 'clock_out'
+  employeeName: string
+  employeeCode: string
+  confidence: number
+  imageUrl: string
+  checkedAt: string
+}
 
 export interface TodayStatusResponse {
   date: string
@@ -79,6 +92,8 @@ export class AttendanceLogsService {
     private readonly attendanceLogEditRepository: Repository<AttendanceLogEdit>,
     private readonly googleSheetsService: GoogleSheetsService,
     private readonly configService: ConfigService,
+    private readonly faceService: FaceService,
+    private readonly storageService: StorageService,
   ) {}
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -91,6 +106,30 @@ export class AttendanceLogsService {
     const date = vnNow.toISOString().substring(0, 10)
     const time = vnNow.toISOString().substring(11, 19)
     return { date, time }
+  }
+
+  /**
+   * Returns current date and time in the timezone of the company the user belongs to.
+   * Falls back to Vietnam timezone (UTC+7) if no timezone is configured.
+   */
+  private async getDateTimeForUser(userId: number): Promise<{ date: string; time: string }> {
+    const companyId = await this.getUserCompanyId(userId)
+
+    if (companyId) {
+      const company = await this.companyRepository.findOne({
+        where: { id: companyId },
+        relations: ['country'],
+      })
+      const timezone = company?.country?.timezone
+
+      if (timezone) {
+        const now = momentTimezone.tz(Date.now(), timezone)
+
+        return { date: now.format('YYYY-MM-DD'), time: now.format('HH:mm:ss') }
+      }
+    }
+
+    return this.getVnDateTime()
   }
 
   /**
@@ -148,6 +187,7 @@ export class AttendanceLogsService {
         { user_id: userId, type: EmployeeRequestType.WFH, status: EmployeeRequestStatus.PENDING },
       ],
     })
+
     return wfhRequests.some((request) => {
       const fromDate = request.from_datetime
         ? new Date(request.from_datetime).toISOString().substring(0, 10)
@@ -273,7 +313,22 @@ export class AttendanceLogsService {
   }
 
   /**
+   * Minimum minutes after clock-in before a new scan is treated as clock-out.
+   * Scans within this window are treated as duplicate clock-ins (earliest time wins).
+   */
+  private static readonly CLOCK_OUT_MIN_GAP_MINUTES = 30
+
+  /** Converts "HH:mm:ss" to total minutes from midnight. */
+  private timeToMinutes(time: string): number {
+    const [hours, minutes] = time.split(':').map(Number)
+
+    return (hours ?? 0) * 60 + (minutes ?? 0)
+  }
+
+  /**
    * Determines clock-in or clock-out based on existing record and records the time.
+   * A new scan within CLOCK_OUT_MIN_GAP_MINUTES of clock-in is treated as a duplicate
+   * clock-in (earliest time wins) to prevent accidental clock-outs from repeated scans.
    */
   private async clockForUser(
     userId: number,
@@ -289,8 +344,15 @@ export class AttendanceLogsService {
       return { log, action: 'clock_in' }
     }
 
-    const log = await this.upsert(userId, date, null, time)
+    const minutesSinceClockIn = this.timeToMinutes(time) - this.timeToMinutes(existing.clock_in)
 
+    if (minutesSinceClockIn < AttendanceLogsService.CLOCK_OUT_MIN_GAP_MINUTES) {
+      const log = await this.upsert(userId, date, time, null)
+
+      return { log, action: 'clock_in' }
+    }
+
+    const log = await this.upsert(userId, date, null, time)
     return { log, action: 'clock_out' }
   }
 
@@ -745,5 +807,94 @@ export class AttendanceLogsService {
     }
 
     this.logger.log(`[AUTO-FILL] Done — filled ${filled} absences for ${date}`)
+  }
+
+  // ─── Face recognition ────────────────────────────────────────────────────
+
+  /**
+   * Processes a face-based check-in or check-out.
+   * Matches the descriptor against registered employees, uploads the photo,
+   * determines clock direction (in/out), then persists the record.
+   *
+   * @param descriptor - 128-element face descriptor from face-api.js
+   * @param imageFile  - Captured frame from the client camera
+   * @param clientIp   - Client IP address
+   * @param deviceInfo - Client User-Agent string
+   * @param location   - Optional "lat,lng" string
+   */
+  async faceCheckin(
+    descriptor: number[],
+    imageFile: Express.Multer.File,
+    clientIp: string,
+    deviceInfo: string,
+    _location?: string,
+  ): Promise<FaceCheckinResult> {
+    const matchResult = await this.faceService.matchFace(descriptor)
+    if (!matchResult) {
+      throw new BadRequestException('Face not recognized. Please register your face or try again.')
+    }
+
+    const imageUrl = await this.storageService.uploadImage(
+      imageFile.buffer,
+      'checkin',
+      matchResult.employeeId,
+    )
+
+    const { date, time } = await this.getDateTimeForUser(matchResult.employeeId)
+    const checkedAt = new Date()
+    const { action } = await this.clockForUser(matchResult.employeeId, date, time)
+
+    const logRecord = await this.attendanceLogRepository.findOne({
+      where: { user_id: matchResult.employeeId, date },
+    })
+
+    if (logRecord) {
+      await this.attendanceLogRepository.update(
+        { id: logRecord.id },
+        {
+          checkin_image_url: imageUrl,
+          confidence: matchResult.confidence,
+          ip_address: clientIp,
+          device_info: deviceInfo || null,
+        },
+      )
+    }
+
+    return {
+      success: true,
+      type: action,
+      employeeName: matchResult.employeeName,
+      employeeCode: matchResult.employeeCode,
+      confidence: matchResult.confidence,
+      imageUrl,
+      checkedAt: checkedAt.toISOString(),
+    }
+  }
+
+  /**
+   * Returns attendance logs for a given date, including user info.
+   */
+  async getByDate(date: string): Promise<AttendanceLog[]> {
+    return this.attendanceLogRepository.find({
+      where: { date },
+      relations: ['user'],
+      order: { user_id: 'ASC' },
+    })
+  }
+
+  /**
+   * Returns today's attendance summary: total check-ins, check-outs, and active employee count.
+   */
+  async getTodayStats(): Promise<{ checkins: number; checkouts: number; totalEmployees: number }> {
+    const { date } = this.getVnDateTime()
+    const logs = await this.attendanceLogRepository.find({ where: { date } })
+    const checkins = logs.filter((log) => log.clock_in).length
+    const checkouts = logs.filter((log) => log.clock_out).length
+
+    const totalEmployees = await this.userRepository.count({
+      where: { is_activated: true, skip_attendance: false },
+    })
+
+    return { checkins, checkouts, totalEmployees }
   }
 }

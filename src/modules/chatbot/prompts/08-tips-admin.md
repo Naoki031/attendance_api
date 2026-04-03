@@ -16,4 +16,7 @@ order: 80
 - When editing a clock-in/clock-out time in Attendance Logs, the save button is disabled until the time values actually differ from the original — this prevents saving redundant edits
 - Every clock-in/clock-out edit is logged with the admin's name, timestamp, and reason. Click the history icon on any row to review the full audit trail
 - Regularly review the **Bug Reports** page to track and resolve issues reported by users. Update the status to keep submitters informed about resolution progress
+- When an employee submits a Face KYC, you will receive a **push notification** and a badge count appears on the KYC icon in the top header. Go to **Management → KYC Management** to review — approve or reject with an optional reason
+- In **Attendance Logs**, click the **camera icon** on any face check-in entry to view the captured photo and confidence score — useful for verifying disputed attendance records
+- To reset an employee's face registration (so they can re-submit), click the **Cancel KYC** button on their row in **Management → Users**
 - Chat emoji reactions are **exclusive per user per message** — each user can only have one reaction; picking a new emoji automatically replaces the previous one

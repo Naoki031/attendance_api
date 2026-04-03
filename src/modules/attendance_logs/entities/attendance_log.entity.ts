@@ -66,6 +66,38 @@ export class AttendanceLog {
   })
   attendance_count!: number
 
+  @Column({
+    nullable: true,
+    name: 'checkin_image_url',
+    length: 500,
+    comment: 'URL of photo taken at check-in/out moment',
+  })
+  checkin_image_url?: string | null
+
+  @Column({
+    nullable: true,
+    name: 'confidence',
+    type: 'float',
+    comment: 'Face match confidence score (0.0 - 1.0)',
+  })
+  confidence?: number | null
+
+  @Column({
+    nullable: true,
+    name: 'ip_address',
+    length: 45,
+    comment: 'Client IP address at time of attendance',
+  })
+  ip_address?: string | null
+
+  @Column({
+    nullable: true,
+    name: 'device_info',
+    type: 'text',
+    comment: 'Client User-Agent string at time of attendance',
+  })
+  device_info?: string | null
+
   @CreateDateColumn({ nullable: true, name: 'created_at', type: 'timestamp' })
   created_at?: Date
 

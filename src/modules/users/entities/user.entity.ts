@@ -162,6 +162,40 @@ export class User {
   })
   permanent_remote_reason?: string
 
+  @Column({
+    nullable: true,
+    name: 'face_descriptor',
+    type: 'json',
+    comment: 'Face descriptor (128-element float array) from face-api.js',
+  })
+  face_descriptor?: number[] | null
+
+  @Column({
+    nullable: true,
+    name: 'face_avatar_url',
+    length: 500,
+    comment: 'URL of registered face avatar image on S3/MinIO',
+  })
+  face_avatar_url?: string | null
+
+  @Column({
+    nullable: true,
+    name: 'kyc_status',
+    type: 'enum',
+    enum: ['pending', 'approved', 'rejected'],
+    comment:
+      'KYC approval status: pending=awaiting admin review, approved=active for check-in, rejected=user must re-submit',
+  })
+  kyc_status?: 'pending' | 'approved' | 'rejected' | null
+
+  @Column({
+    nullable: true,
+    name: 'kyc_rejection_reason',
+    length: 500,
+    comment: 'Admin reason when KYC was rejected',
+  })
+  kyc_rejection_reason?: string | null
+
   @CreateDateColumn({
     nullable: true,
     name: 'created_at',
