@@ -75,6 +75,17 @@ export class AttendanceLogsController {
   }
 
   /**
+   * Returns the current user's attendance logs for a given month.
+   * Query param: month (YYYY-MM). Defaults to the current month.
+   */
+  @Get('my')
+  getMyLogs(@Query('month') month: string | undefined, @User() user: UserEntity) {
+    const target = month ?? new Date().toISOString().substring(0, 7)
+
+    return this.attendanceLogsService.findMyLogs(user.id, target)
+  }
+
+  /**
    * Returns today's QR token for the admin's company (management screen only).
    */
   @Get('today-qr')
@@ -165,6 +176,7 @@ export class AttendanceLogsController {
     @Body('descriptor') descriptorJson: string,
     @Body('location') location: string | undefined,
     @Req() request: Request,
+    @User() user: UserEntity,
   ) {
     if (!imageFile) throw new BadRequestException('Image file is required')
 
@@ -191,6 +203,8 @@ export class AttendanceLogsController {
       clientIp,
       deviceInfo,
       location,
+      user.id,
+      user.roles,
     )
   }
 

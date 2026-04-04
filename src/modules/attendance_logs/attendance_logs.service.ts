@@ -180,15 +180,20 @@ export class AttendanceLogsService {
       return false
     }
 
-    // Check WFH/PENDING WFH for weekdays only (Monday-Friday)
-    const wfhRequests = await this.employeeRequestRepository.find({
+    // Check WFH (approved or pending) and BUSINESS_TRIP (approved only) for weekdays
+    const remoteRequests = await this.employeeRequestRepository.find({
       where: [
         { user_id: userId, type: EmployeeRequestType.WFH, status: EmployeeRequestStatus.APPROVED },
         { user_id: userId, type: EmployeeRequestType.WFH, status: EmployeeRequestStatus.PENDING },
+        {
+          user_id: userId,
+          type: EmployeeRequestType.BUSINESS_TRIP,
+          status: EmployeeRequestStatus.APPROVED,
+        },
       ],
     })
 
-    return wfhRequests.some((request) => {
+    return remoteRequests.some((request) => {
       const fromDate = request.from_datetime
         ? new Date(request.from_datetime).toISOString().substring(0, 10)
         : ''
@@ -568,6 +573,25 @@ export class AttendanceLogsService {
   }
 
   /**
+   * Retrieves the current user's attendance logs for a given month.
+   * Month format: YYYY-MM. Defaults to the current month if not provided.
+   */
+  findMyLogs(userId: number, month: string): Promise<AttendanceLog[]> {
+    const from = `${month}-01`
+    const lastDay = new Date(
+      parseInt(month.substring(0, 4)),
+      parseInt(month.substring(5, 7)),
+      0,
+    ).getDate()
+    const to = `${month}-${String(lastDay).padStart(2, '0')}`
+
+    return this.attendanceLogRepository.find({
+      where: { user_id: userId, date: Between(from, to) },
+      order: { date: 'ASC' },
+    })
+  }
+
+  /**
    * Retrieves attendance logs within a date range.
    * If companyId is provided, only returns logs for users belonging to that company.
    */
@@ -828,10 +852,47 @@ export class AttendanceLogsService {
     clientIp: string,
     deviceInfo: string,
     _location?: string,
+    requestingUserId?: number,
+    requestingUserRoles?: string[],
   ): Promise<FaceCheckinResult> {
     const matchResult = await this.faceService.matchFace(descriptor)
     if (!matchResult) {
       throw new BadRequestException('Face not recognized. Please register your face or try again.')
+    }
+
+    // Non-admin employees can only clock in/out themselves — prevents clocking out a colleague early
+    const isAdmin = (requestingUserRoles ?? []).some((role) => {
+      const normalized = role.toLowerCase().replace(/[\s_]+/g, '')
+
+      return normalized === 'admin' || normalized === 'superadmin'
+    })
+
+    if (!isAdmin && requestingUserId !== undefined && matchResult.employeeId !== requestingUserId) {
+      throw new ForbiddenException(
+        'You can only clock in/out yourself. Ask an admin to set up a dedicated shared device.',
+      )
+    }
+
+    const { date, time } = await this.getDateTimeForUser(matchResult.employeeId)
+
+    // Enforce network security: IP must be in company whitelist OR user must have WFH/permanent remote
+    const companyId = await this.getUserCompanyId(matchResult.employeeId)
+
+    if (companyId) {
+      const company = await this.companyRepository.findOne({ where: { id: companyId } })
+      const ipAllowed = company?.allowed_ips && this.isIpAllowed(clientIp, company.allowed_ips)
+
+      if (!ipAllowed) {
+        const isRemoteAllowed = await this.checkIsWfhToday(matchResult.employeeId, date)
+
+        if (!isRemoteAllowed) {
+          const normalizedIp = clientIp.startsWith('::ffff:') ? clientIp.slice(7) : clientIp
+
+          throw new ForbiddenException(
+            `Clock-in not allowed from IP ${normalizedIp}. Device must be on the company network or you must have an approved WFH request.`,
+          )
+        }
+      }
     }
 
     const imageUrl = await this.storageService.uploadImage(
@@ -839,8 +900,6 @@ export class AttendanceLogsService {
       'checkin',
       matchResult.employeeId,
     )
-
-    const { date, time } = await this.getDateTimeForUser(matchResult.employeeId)
     const checkedAt = new Date()
     const { action } = await this.clockForUser(matchResult.employeeId, date, time)
 

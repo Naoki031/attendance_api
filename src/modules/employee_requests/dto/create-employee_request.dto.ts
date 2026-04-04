@@ -81,4 +81,9 @@ export class CreateEmployeeRequestDto {
   @IsEnum(OvertimeType)
   @IsOptional()
   overtime_type?: OvertimeType
+
+  // Business trip-specific
+  @IsString()
+  @IsOptional()
+  trip_destination?: string
 }

@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator'
+import { IsIn, IsOptional, IsString, Matches } from 'class-validator'
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -15,6 +15,9 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^[0-9+\s\-().]*$/, {
+    message: 'phone_number must contain only digits and phone characters',
+  })
   phone_number?: string
 
   @IsOptional()

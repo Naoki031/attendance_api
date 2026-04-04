@@ -16,6 +16,7 @@ export enum SlackChannelFeature {
   EQUIPMENT = 'equipment',
   CLOCK_FORGET = 'clock_forget',
   OVERTIME = 'overtime',
+  BUSINESS_TRIP = 'business_trip',
   ERROR = 'error',
 }
 

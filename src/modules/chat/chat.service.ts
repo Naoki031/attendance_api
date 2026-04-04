@@ -116,6 +116,7 @@ export class ChatService {
     content: string
     detectedLang: string
     roomId: number
+    onChunk?: (lang: string, chunk: string) => void
   }): Promise<Record<string, string>> {
     const targetLangs = SUPPORTED_LANGUAGES.filter(
       (language) => language !== parameters.detectedLang,
@@ -135,12 +136,14 @@ export class ChatService {
       }
     }
 
+    // When there's a quote prefix, stream without the prefix and reattach only in final result
     const translations = await this.translateService.getOrCreateTranslations(
       parameters.messageId,
       textToTranslate,
       parameters.detectedLang,
       targetLangs,
       glossary,
+      parameters.onChunk,
     )
 
     if (quotePrefix) {

@@ -747,6 +747,7 @@ export class EmployeeRequestsService {
       location: request.location ?? '',
       equipment_name: request.equipment_name ?? '',
       quantity: String(request.quantity ?? ''),
+      trip_destination: request.trip_destination ?? '',
     }
     return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => variables[key] ?? '')
   }
@@ -773,6 +774,8 @@ export class EmployeeRequestsService {
         return this.buildClockForgetMessage(request, approvers)
       case EmployeeRequestType.OVERTIME:
         return this.buildOvertimeMessage(request, approvers)
+      case EmployeeRequestType.BUSINESS_TRIP:
+        return this.buildBusinessTripMessage(request, approvers)
       case EmployeeRequestType.WFH:
       default:
         return this.buildWfhMessage(request, approvers)
@@ -782,6 +785,36 @@ export class EmployeeRequestsService {
   /**
    * Maps request type to slack channel feature enum.
    */
+  private buildBusinessTripMessage(request: EmployeeRequest, approvers: User[]): string {
+    const requesterMention = this.slackMention(request.user)
+    const approverMentions = approvers.map((approver) => this.slackMention(approver)).join(' ')
+
+    const header = [
+      approverMentions,
+      `cc ${requesterMention}`,
+      `${requesterMention} has a business trip request.`,
+    ]
+
+    const body: string[] = [
+      'Please approve my business trip request.',
+      '',
+      `From: ${this.formatDatetimeFull(request.from_datetime)}`,
+      `To: ${this.formatDatetimeFull(request.to_datetime)}`,
+      '',
+      `Destination: ${request.trip_destination ?? '—'}`,
+    ]
+
+    if (request.reason) {
+      body.push('')
+      body.push(`Purpose: ${request.reason}`)
+    }
+
+    body.push('')
+    body.push('Thank you!')
+
+    return this.buildMessage(header, body)
+  }
+
   private mapTypeToFeature(type: EmployeeRequestType): SlackChannelFeature {
     const map: Record<EmployeeRequestType, SlackChannelFeature> = {
       [EmployeeRequestType.WFH]: SlackChannelFeature.WFH,
@@ -789,6 +822,7 @@ export class EmployeeRequestsService {
       [EmployeeRequestType.EQUIPMENT]: SlackChannelFeature.EQUIPMENT,
       [EmployeeRequestType.CLOCK_FORGET]: SlackChannelFeature.CLOCK_FORGET,
       [EmployeeRequestType.OVERTIME]: SlackChannelFeature.OVERTIME,
+      [EmployeeRequestType.BUSINESS_TRIP]: SlackChannelFeature.BUSINESS_TRIP,
     }
 
     return map[type]

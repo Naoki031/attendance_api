@@ -10,5 +10,6 @@ Fields:
 3. **END DATE** (required)
 4. **END TIME** (required) — default 17:00
 5. **REASON** (required)
-6. **CC** (optional)
+6. **CC — INDIVIDUALS** (optional) — notify specific colleagues (approvers are excluded from this list)
+7. **CC — GROUPS** (optional) — notify an entire group; all members will be included
 Then click **"Submit Request"**.

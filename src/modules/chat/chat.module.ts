@@ -13,6 +13,7 @@ import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/use
 import { FirebaseModule } from '@/modules/firebase/firebase.module'
 import { UsersModule } from '@/modules/users/users.module'
 import { MessageReactionsModule } from '@/modules/message_reactions/message-reactions.module'
+import { PinnedMessagesModule } from '@/modules/pinned-messages/pinned-messages.module'
 // TODO: Import when module is ready:
 // import { GlossaryModule } from '../glossary/glossary.module'
 
@@ -25,6 +26,7 @@ import { MessageReactionsModule } from '@/modules/message_reactions/message-reac
     FirebaseModule,
     UsersModule,
     MessageReactionsModule,
+    PinnedMessagesModule,
     // GlossaryModule,
   ],
   controllers: [ChatRoomController],

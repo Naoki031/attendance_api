@@ -14,6 +14,7 @@ export enum EmployeeRequestType {
   EQUIPMENT = 'equipment',
   CLOCK_FORGET = 'clock_forget',
   OVERTIME = 'overtime',
+  BUSINESS_TRIP = 'business_trip',
 }
 
 export enum EmployeeRequestStatus {
@@ -111,6 +112,10 @@ export class EmployeeRequest {
   // Overtime-specific fields
   @Column({ type: 'enum', enum: OvertimeType, nullable: true, name: 'overtime_type' })
   overtime_type?: OvertimeType
+
+  // Business trip-specific fields
+  @Column({ nullable: true, name: 'trip_destination', length: 255 })
+  trip_destination?: string
 
   /** Row index in Google Sheet — set after appending, used to update on approval */
   @Column({ nullable: true, name: 'sheet_row_index', type: 'int' })

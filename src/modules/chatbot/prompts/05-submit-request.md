@@ -12,6 +12,7 @@ On the Home page you will see **Quick Action cards** — click the card for the 
 - 💻 **Equipment** ("Borrow equipment") — Equipment request
 - ⏰ **Clock Forget** ("Missed clock-in/out") — Clock Forget request
 - 🔥 **Overtime** ("Overtime request") — Overtime request
+- 🧳 **Business Trip** ("Business trip request") — Business Trip request
 
 Clicking a card opens a dialog form. Fill in the fields and click **"Submit Request"**.
 

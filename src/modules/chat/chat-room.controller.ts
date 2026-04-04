@@ -13,6 +13,7 @@ import { ChatRoomService } from './chat-room.service'
 import { CreateChatRoomDto } from './dto/create-chat-room.dto'
 import { UpdateChatRoomDto } from './dto/update-chat-room.dto'
 import { InviteUserDto } from './dto/invite-user.dto'
+import { PinnedMessagesService } from '@/modules/pinned-messages/pinned-messages.service'
 import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import type { User as UserEntity } from '@/modules/users/entities/user.entity'
@@ -20,7 +21,10 @@ import type { User as UserEntity } from '@/modules/users/entities/user.entity'
 @Controller('chat-rooms')
 @UseGuards(PermissionsGuard)
 export class ChatRoomController {
-  constructor(private readonly chatRoomService: ChatRoomService) {}
+  constructor(
+    private readonly chatRoomService: ChatRoomService,
+    private readonly pinnedMessagesService: PinnedMessagesService,
+  ) {}
 
   @Post()
   async create(@Body(ValidationPipe) dto: CreateChatRoomDto, @User() user: UserEntity) {
@@ -132,5 +136,12 @@ export class ChatRoomController {
     await this.chatRoomService.markAsRead(room.id, user.id)
 
     return { success: true }
+  }
+
+  @Get(':uuid/pinned-messages')
+  async getPinnedMessages(@Param('uuid') uuid: string) {
+    const room = await this.chatRoomService.findByUuid(uuid)
+
+    return this.pinnedMessagesService.findByRoom(room.id)
   }
 }

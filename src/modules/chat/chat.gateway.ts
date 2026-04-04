@@ -15,6 +15,7 @@ import { ChatRoomType, ChatRoomVisibility } from './entities/chat-room.entity'
 import { FirebaseService } from '@/modules/firebase/firebase.service'
 import { UsersService } from '@/modules/users/users.service'
 import { MessageReactionsService } from '@/modules/message_reactions/message-reactions.service'
+import { PinnedMessagesService } from '@/modules/pinned-messages/pinned-messages.service'
 
 interface RoomUser {
   userId: number
@@ -65,6 +66,11 @@ interface ToggleReactionPayload {
   emoji: string
 }
 
+interface PinMessagePayload {
+  roomUuid: string
+  messageId: number
+}
+
 @WebSocketGateway({ cors: { origin: '*' }, namespace: 'chat', path: '/ws' })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name)
@@ -76,6 +82,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
     private readonly messageReactionsService: MessageReactionsService,
+    private readonly pinnedMessagesService: PinnedMessagesService,
   ) {}
 
   @WebSocketServer()
@@ -275,6 +282,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           content: result.content,
           detectedLang: result.detectedLang,
           roomId,
+          onChunk: (lang, chunk) => {
+            this.server
+              .to(`room_${roomId}`)
+              .emit('message_translation_stream', { id: result.id, lang, chunk })
+          },
         })
         .then((translations) => {
           if (Object.keys(translations).length > 0) {
@@ -338,6 +350,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           content: result.content,
           detectedLang: result.detectedLang,
           roomId,
+          onChunk: (lang, chunk) => {
+            this.server
+              .to(`room_${roomId}`)
+              .emit('message_translation_stream', { id: result.id, lang, chunk })
+          },
         })
         .then((translations) => {
           if (Object.keys(translations).length > 0) {
@@ -423,6 +440,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           content: result.content,
           detectedLang: result.detectedLang,
           roomId,
+          onChunk: (lang, chunk) => {
+            this.server
+              .to(`room_${roomId}`)
+              .emit('message_translation_stream', { id: result.id, lang, chunk })
+          },
         })
         .then((translations) => {
           if (Object.keys(translations).length > 0) {
@@ -473,6 +495,86 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (error) {
       this.logger.error('Failed to toggle reaction', error)
       client.emit('error', { message: 'Failed to toggle reaction' })
+    }
+  }
+
+  @SubscribeMessage('pin_message')
+  async handlePinMessage(
+    @MessageBody() payload: PinMessagePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+
+      return
+    }
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+
+      return
+    }
+
+    try {
+      await this.pinnedMessagesService.pin(roomId, payload.messageId, user.userId)
+
+      this.server.to(`room_${roomId}`).emit('message_pinned', {
+        messageId: payload.messageId,
+        pinnedByUserId: user.userId,
+        pinnedByName: user.username,
+      })
+    } catch (error) {
+      this.logger.error('Failed to pin message', error)
+      client.emit('error', { message: 'Failed to pin message' })
+    }
+  }
+
+  @SubscribeMessage('unpin_message')
+  async handleUnpinMessage(
+    @MessageBody() payload: PinMessagePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+
+      return
+    }
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+
+      return
+    }
+
+    const admin = await this.chatRoomService.isAdmin(roomId, user.userId)
+
+    if (!admin) {
+      client.emit('error', { message: 'Only room admins can unpin messages' })
+
+      return
+    }
+
+    try {
+      await this.pinnedMessagesService.unpin(roomId, payload.messageId)
+
+      this.server.to(`room_${roomId}`).emit('message_unpinned', {
+        messageId: payload.messageId,
+      })
+    } catch (error) {
+      this.logger.error('Failed to unpin message', error)
+      client.emit('error', { message: 'Failed to unpin message' })
     }
   }
 

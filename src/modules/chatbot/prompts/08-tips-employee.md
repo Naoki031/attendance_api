@@ -12,3 +12,4 @@ order: 80
 - Encountered a bug or issue? Click the **Report Bug** button in the sidebar (bug icon, bottom). It automatically captures your current screen as a screenshot — just add a title and submit
 - To use **Face Check-In**, go to your **Profile** page first and complete the Face KYC registration. After an admin approves it, the "Face Check-In" button on the Home page will let you clock in/out using your camera
 - During Face KYC or face check-in, follow the on-screen instruction (blink / smile / turn head) — the system will read it out loud and the oval guide turns **green** when your face is detected correctly
+- To review your own attendance records, go to your **Profile** page and scroll down to the **Attendance History** table — use the month and year selectors to browse past months

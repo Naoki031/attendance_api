@@ -452,6 +452,18 @@ export class ChatRoomService {
   }
 
   /**
+   * Checks if a user is an admin of a room.
+   */
+  async isAdmin(roomId: number, userId: number): Promise<boolean> {
+    const member = await this.chatRoomMemberRepository.findOneBy({
+      room_id: roomId,
+      user_id: userId,
+    })
+
+    return member?.role === ChatRoomMemberRole.ADMIN
+  }
+
+  /**
    * Returns unread message counts for all rooms the user is a member of.
    * Keyed by room UUID for client convenience.
    */
@@ -502,6 +514,7 @@ export class ChatRoomService {
 
   /**
    * Returns recent read messages from other users across all rooms.
+   * Returns only the latest top-level message per room (excludes thread replies).
    */
   async getRecentReadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
     const results = await this.chatRoomMemberRepository.query(
@@ -514,14 +527,23 @@ export class ChatRoomService {
        JOIN chat_rooms cr ON cr.id = crm.room_id
        JOIN messages m ON m.room_id = cr.id
          AND m.user_id != ?
+         AND m.parent_id IS NULL
          AND crm.last_read_at IS NOT NULL
          AND m.created_at <= crm.last_read_at
        JOIN users u ON u.id = m.user_id
        WHERE crm.user_id = ?
          AND cr.deleted_at IS NULL
+         AND m.id = (
+           SELECT MAX(m2.id) FROM messages m2
+           WHERE m2.room_id = cr.id
+             AND m2.user_id != ?
+             AND m2.parent_id IS NULL
+             AND crm.last_read_at IS NOT NULL
+             AND m2.created_at <= crm.last_read_at
+         )
        ORDER BY m.created_at DESC
        LIMIT ?`,
-      [userId, userId, limit],
+      [userId, userId, userId, limit],
     )
 
     return results.map((row: Record<string, unknown>) => ({
@@ -540,6 +562,7 @@ export class ChatRoomService {
 
   /**
    * Returns recent unread messages from other users across all rooms.
+   * Returns only the latest top-level message per room (excludes thread replies).
    */
   async getUnreadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
     const results = await this.chatRoomMemberRepository.query(
@@ -552,13 +575,21 @@ export class ChatRoomService {
        JOIN chat_rooms cr ON cr.id = crm.room_id
        JOIN messages m ON m.room_id = cr.id
          AND m.user_id != ?
+         AND m.parent_id IS NULL
          AND (crm.last_read_at IS NULL OR m.created_at > crm.last_read_at)
        JOIN users u ON u.id = m.user_id
        WHERE crm.user_id = ?
          AND cr.deleted_at IS NULL
+         AND m.id = (
+           SELECT MAX(m2.id) FROM messages m2
+           WHERE m2.room_id = cr.id
+             AND m2.user_id != ?
+             AND m2.parent_id IS NULL
+             AND (crm.last_read_at IS NULL OR m2.created_at > crm.last_read_at)
+         )
        ORDER BY m.created_at DESC
        LIMIT ?`,
-      [userId, userId, limit],
+      [userId, userId, userId, limit],
     )
 
     return results.map((row: Record<string, unknown>) => ({

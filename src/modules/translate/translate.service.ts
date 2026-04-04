@@ -40,6 +40,8 @@ export class TranslateService {
   private readonly logger = new Logger(TranslateService.name)
   private client: Anthropic | null = null
   private model: string = 'claude-haiku-4-5-20251001'
+  private maxTokens: number = 8192
+  private maxInputLength: number = 5000
 
   constructor(
     private readonly configService: ConfigService,
@@ -47,7 +49,16 @@ export class TranslateService {
     private readonly translationCacheRepository: Repository<TranslationCache>,
   ) {
     this.model = this.configService.get<string>('TRANSLATE_MODEL') ?? 'claude-haiku-4-5-20251001'
+    this.maxTokens = parseInt(this.configService.get<string>('TRANSLATE_MAX_TOKENS') ?? '8192', 10)
+    this.maxInputLength = parseInt(
+      this.configService.get<string>('TRANSLATE_MAX_INPUT_LENGTH') ?? '5000',
+      10,
+    )
     const apiKey = this.configService.get<string>('ANTHROPIC_API_KEY')
+
+    this.logger.log(
+      `TranslateService init — model=${this.model} maxTokens=${this.maxTokens} maxInputLength=${this.maxInputLength} apiKey=${apiKey ? `set(${apiKey.slice(0, 12)}...)` : 'MISSING'}`,
+    )
 
     if (!apiKey) {
       this.logger.warn('TranslateService disabled: ANTHROPIC_API_KEY is not set')
@@ -90,10 +101,51 @@ export class TranslateService {
     sourceLang: string,
     targetLangs: string[],
     glossaryTerms: string[] = [],
+    onChunk?: (lang: string, chunk: string) => void,
   ): Promise<Record<string, string>> {
+    this.logger.log(
+      `translateToMultiple — textLen=${text.length} src=${sourceLang} targets=${targetLangs.join(',')} client=${this.client ? 'ok' : 'NULL'}`,
+    )
+
     if (!this.client) return {}
     if (targetLangs.length === 0) return {}
     if (text.length < 3 || this.isOnlyEmoji(text)) return {}
+
+    const results = await Promise.all(
+      targetLangs.map((lang) =>
+        this.translateToSingle(
+          text,
+          sourceLang,
+          lang,
+          glossaryTerms,
+          onChunk ? (chunk) => onChunk(lang, chunk) : undefined,
+        ),
+      ),
+    )
+
+    const merged: Record<string, string> = {}
+
+    for (let index = 0; index < targetLangs.length; index++) {
+      const lang = targetLangs[index]
+      const translation = results[index]
+
+      if (lang && translation) merged[lang] = translation
+    }
+
+    return merged
+  }
+
+  private async translateToSingle(
+    text: string,
+    sourceLang: string,
+    targetLang: string,
+    glossaryTerms: string[] = [],
+    onChunk?: (chunk: string) => void,
+  ): Promise<string | null> {
+    if (!this.client) return null
+
+    const truncated =
+      text.length > this.maxInputLength ? text.substring(0, this.maxInputLength) : text
 
     const glossarySection =
       glossaryTerms.length > 0
@@ -101,52 +153,17 @@ export class TranslateService {
         : ''
 
     const systemPrompt = [
-      `You are a professional translator. Translate the text inside <text> tags.`,
-      `\n- Source language: ${sourceLang}`,
-      `- Target languages: ${targetLangs.join(', ')}`,
-      `\n- NEVER translate these IT terms, keep them as-is: ${IT_TERMS_PRESERVED}`,
+      `You are a professional translator. Translate the text inside <text> tags from ${sourceLang} to ${targetLang}.`,
+      `- NEVER translate these IT terms, keep them as-is: ${IT_TERMS_PRESERVED}`,
       glossarySection,
-      `\n- Return ONLY a valid JSON object with ISO 639-1 language codes as keys.`,
-      `- No markdown, no code fences, no explanation — only raw JSON.`,
-      `- Example format: {"en": "translated text", "ja": "翻訳されたテキスト", "vi": "văn bản đã dịch"}`,
+      `- Return ONLY the translated text, no explanation, no markdown, no quotes.`,
     ].join('\n')
 
-    try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: `Translate to [${targetLangs.join(', ')}]:\n<text>${text}</text>\nFormat: {${targetLangs.map((lang) => `"${lang}": "..."`).join(', ')}}`,
-          },
-        ],
-      })
+    this.logger.log(
+      `translateToSingle — target=${targetLang} len=${truncated.length} maxTokens=${this.maxTokens}`,
+    )
 
-      const block = response.content[0]
-      const rawText = block.type === 'text' ? block.text.trim() : ''
-
-      const cleaned = rawText
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim()
-      const parsed = JSON.parse(cleaned) as Record<string, string>
-
-      const result: Record<string, string> = {}
-
-      for (const lang of targetLangs) {
-        if (parsed[lang]) {
-          result[lang] = parsed[lang]
-        }
-      }
-
-      return result
-    } catch (error) {
-      this.logger.error('Failed to translate text', error)
-
-      return {}
-    }
+    return this.tryTranslateWithModel(this.model, truncated, targetLang, systemPrompt, onChunk)
   }
 
   async getOrCreateTranslations(
@@ -155,6 +172,7 @@ export class TranslateService {
     sourceLang: string,
     targetLangs: string[],
     glossaryTerms: string[] = [],
+    onChunk?: (lang: string, chunk: string) => void,
   ): Promise<Record<string, string>> {
     if (targetLangs.length === 0) return {}
 
@@ -172,6 +190,7 @@ export class TranslateService {
       sourceLang,
       missingLangs,
       glossaryTerms,
+      onChunk,
     )
 
     const merged = { ...cachedTranslations, ...newTranslations }
@@ -225,6 +244,83 @@ export class TranslateService {
     }
 
     return result
+  }
+
+  private async tryTranslateWithModel(
+    model: string,
+    text: string,
+    targetLang: string,
+    systemPrompt: string,
+    onChunk?: (chunk: string) => void,
+  ): Promise<string | null> {
+    if (!this.client) return null
+
+    const useStreaming = text.length > 1000
+    const maxRetries = 2
+    const requestPayload = {
+      model,
+      max_tokens: this.maxTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user' as const, content: `<text>${text}</text>` }],
+    }
+
+    this.logger.log(
+      `translateToSingle — target=${targetLang} mode=${useStreaming ? 'stream' : 'sync'}`,
+    )
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (useStreaming) {
+          const stream = this.client.messages.stream(requestPayload, { timeout: 120_000 })
+
+          let fullText = ''
+
+          stream.on('text', (textDelta: string) => {
+            fullText += textDelta
+            onChunk?.(textDelta)
+          })
+
+          const finalMessage = await stream.finalMessage()
+
+          this.logger.log(
+            `translateToSingle done — target=${targetLang} stopReason=${finalMessage.stop_reason} resultLen=${fullText.length}`,
+          )
+
+          return fullText.trim() || null
+        } else {
+          const response = await this.client.messages.create(requestPayload, { timeout: 60_000 })
+          const block = response.content[0]
+          const result = block.type === 'text' ? block.text.trim() : null
+
+          this.logger.log(
+            `translateToSingle done — target=${targetLang} stopReason=${response.stop_reason} resultLen=${result?.length ?? 0}`,
+          )
+
+          return result || null
+        }
+      } catch (error) {
+        const status = (error as { status?: number }).status
+        const isRetryable = status === 529 || status === 503 || status === 429
+
+        if (isRetryable && attempt < maxRetries) {
+          const delay = Math.round(5000 + Math.random() * 3000)
+          this.logger.warn(
+            `translateToSingle HTTP ${status} — retry ${attempt}/${maxRetries - 1} in ${delay}ms`,
+          )
+          await new Promise((resolve) => setTimeout(resolve, delay))
+
+          continue
+        }
+
+        this.logger.error(
+          `translateToSingle failed — target=${targetLang} attempt=${attempt}: ${(error as Error).message}`,
+        )
+
+        return null
+      }
+    }
+
+    return null
   }
 
   private isOnlyEmoji(text: string): boolean {

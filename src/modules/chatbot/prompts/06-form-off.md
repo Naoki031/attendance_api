@@ -13,5 +13,6 @@ Fields to fill in:
 6. **UNIT (HOURS)** (required) — auto-calculated (Mon–Fri, 08:00–17:00, excluding lunch 12:00–13:00); you can override manually
 7. **REASON FOR LEAVE** (required) — text area
 8. **NOTE** (optional) — additional notes
-9. **CC** (optional) — notify additional colleagues about this request
+9. **CC — INDIVIDUALS** (optional) — notify specific colleagues (approvers are excluded from this list)
+10. **CC — GROUPS** (optional) — notify an entire group; all members will be included
 Then click **"Submit Request"**.

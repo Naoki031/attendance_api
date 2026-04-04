@@ -22,7 +22,6 @@ import { SlackChannelsModule } from './modules/slack_channels/slack_channels.mod
 import { EmployeeRequestsModule } from './modules/employee_requests/employee_requests.module'
 import { EventsModule } from './modules/events/events.module'
 import { AttendanceLogsModule } from './modules/attendance_logs/attendance_logs.module'
-import { AttendanceSyncModule } from './modules/attendance_sync/attendance_sync.module'
 import { IclockModule } from './modules/iclock/iclock.module'
 import { UserWorkSchedulesModule } from './modules/user_work_schedules/user_work_schedules.module'
 import { GroupsModule } from './modules/groups/groups.module'
@@ -59,7 +58,6 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
     EmployeeRequestsModule,
     EventsModule,
     AttendanceLogsModule,
-    AttendanceSyncModule,
     IclockModule,
     UserWorkSchedulesModule,
     GroupsModule,
