@@ -208,7 +208,9 @@ export class ChatRoomService {
       }
     }
 
-    // Convert to plain objects and attach direct_user + member_count
+    const previewMemberMap = await this.fetchPreviewMembers(roomIds)
+
+    // Convert to plain objects and attach direct_user + member_count + preview_members
     return rooms.map((room) => {
       const plain = instanceToPlain(room) as Record<string, unknown>
 
@@ -217,6 +219,7 @@ export class ChatRoomService {
       }
 
       plain.member_count = memberCountMap.get(room.id) ?? 0
+      plain.preview_members = previewMemberMap.get(room.id) ?? []
 
       return plain
     })
@@ -242,10 +245,12 @@ export class ChatRoomService {
       )
 
     const memberCountMap = new Map(countRows.map((row) => [Number(row.room_id), Number(row.count)]))
+    const previewMemberMap = await this.fetchPreviewMembers(roomIds)
 
     return rooms.map((room) => ({
       ...instanceToPlain(room),
       member_count: memberCountMap.get(room.id) ?? 0,
+      preview_members: previewMemberMap.get(room.id) ?? [],
     }))
   }
 
@@ -620,6 +625,47 @@ export class ChatRoomService {
     } else {
       await this.chatRoomRepository.softDelete({ id: roomId })
     }
+  }
+
+  /**
+   * Fetches up to 4 preview members (id, full_name, avatar) for each room.
+   * Returns a map keyed by room_id.
+   */
+  private async fetchPreviewMembers(
+    roomIds: number[],
+  ): Promise<Map<number, Array<{ id: number; full_name: string; avatar?: string }>>> {
+    if (roomIds.length === 0) return new Map()
+
+    const rows: Array<{ room_id: number; id: number; full_name: string; avatar: string | null }> =
+      await this.chatRoomMemberRepository.query(
+        `SELECT t.room_id, t.id, t.full_name, t.avatar
+         FROM (
+           SELECT crm.room_id,
+                  u.id,
+                  CONCAT(u.first_name, ' ', u.last_name) AS full_name,
+                  u.avatar,
+                  ROW_NUMBER() OVER (PARTITION BY crm.room_id ORDER BY crm.joined_at ASC) AS rn
+           FROM chat_room_members crm
+           JOIN users u ON u.id = crm.user_id
+           WHERE crm.room_id IN (${roomIds.map(() => '?').join(',')})
+         ) t
+         WHERE t.rn <= 4`,
+        roomIds,
+      )
+
+    const map = new Map<number, Array<{ id: number; full_name: string; avatar?: string }>>()
+
+    for (const row of rows) {
+      const roomId = Number(row.room_id)
+      if (!map.has(roomId)) map.set(roomId, [])
+      map.get(roomId)!.push({
+        id: Number(row.id),
+        full_name: String(row.full_name),
+        avatar: row.avatar ?? undefined,
+      })
+    }
+
+    return map
   }
 
   /**

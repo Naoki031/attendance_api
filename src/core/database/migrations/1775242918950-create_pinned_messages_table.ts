@@ -2,6 +2,9 @@ import { MigrationInterface, QueryRunner, Table, TableForeignKey, TableIndex } f
 
 export class CreatePinnedMessagesTable1775242918950 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Guard: table may already exist if created before this migration was tracked
+    if (await queryRunner.hasTable('pinned_messages')) return
+
     await queryRunner.createTable(
       new Table({
         name: 'pinned_messages',

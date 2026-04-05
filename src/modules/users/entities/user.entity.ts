@@ -196,6 +196,14 @@ export class User {
   })
   kyc_rejection_reason?: string | null
 
+  @Column({
+    nullable: true,
+    name: 'last_seen_at',
+    type: 'timestamp',
+    comment: 'Timestamp of the most recent authenticated request from this user',
+  })
+  last_seen_at?: Date | null
+
   @CreateDateColumn({
     nullable: true,
     name: 'created_at',

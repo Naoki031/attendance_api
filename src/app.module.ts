@@ -34,9 +34,11 @@ import { MessageReactionsModule } from './modules/message_reactions/message-reac
 import { StorageModule } from './modules/storage/storage.module'
 import { FaceModule } from './modules/face/face.module'
 import { FeaturesModule } from './modules/features/features.module'
+import { MeetingsModule } from './modules/meetings/meetings.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
-import { APP_GUARD } from '@nestjs/core'
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
+import { LastSeenInterceptor } from '@/modules/users/interceptors/last-seen.interceptor'
 
 @Module({
   imports: [
@@ -71,12 +73,17 @@ import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
     StorageModule,
     FaceModule,
     FeaturesModule,
+    MeetingsModule,
     // EmployeesModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
       useClass: JwtGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LastSeenInterceptor,
     },
     JwtStrategy,
   ],

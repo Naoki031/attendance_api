@@ -71,12 +71,14 @@ export class MessagesService {
     const nextCursor = results.length < limit ? null : results[results.length - 1].id
     const messages = results.reverse()
 
-    // Attach grouped reactions
+    // Attach grouped reactions and reply participants
     const messageIds = messages.map((message: MessageWithTranslation) => message.id)
     const reactionsMap = await this.messageReactionsService.getGroupedForMessages(messageIds)
+    const participantsMap = await this.fetchReplyParticipants(messageIds)
 
     for (const message of messages) {
       message.reactions = reactionsMap.get(message.id) ?? []
+      message.reply_participants = participantsMap.get(message.id) ?? []
     }
 
     return { messages, nextCursor }
@@ -112,6 +114,52 @@ export class MessagesService {
     }
 
     return results
+  }
+
+  /**
+   * Returns up to 3 distinct reply participants per message.
+   * Uses DENSE_RANK() to rank unique users within each parent message.
+   */
+  private async fetchReplyParticipants(
+    messageIds: number[],
+  ): Promise<Map<number, Array<{ userId: number; username: string; avatar: string }>>> {
+    if (messageIds.length === 0) return new Map()
+
+    const rows: Array<{
+      message_id: number
+      id: number
+      username: string
+      avatar: string | null
+    }> = await this.messageRepository.query(
+      `SELECT t.message_id, t.id, t.username, t.avatar
+       FROM (
+         SELECT r.parent_id AS message_id,
+                u.id,
+                CONCAT(u.first_name, ' ', u.last_name) AS username,
+                u.avatar,
+                DENSE_RANK() OVER (PARTITION BY r.parent_id ORDER BY u.id) AS dr
+         FROM messages r
+         JOIN users u ON r.user_id = u.id
+         WHERE r.parent_id IN (${messageIds.map(() => '?').join(',')})
+         GROUP BY r.parent_id, u.id, u.first_name, u.last_name, u.avatar
+       ) t
+       WHERE t.dr <= 3`,
+      messageIds,
+    )
+
+    const map = new Map<number, Array<{ userId: number; username: string; avatar: string }>>()
+
+    for (const row of rows) {
+      const messageId = Number(row.message_id)
+      if (!map.has(messageId)) map.set(messageId, [])
+      map.get(messageId)!.push({
+        userId: Number(row.id),
+        username: String(row.username),
+        avatar: row.avatar ?? '',
+      })
+    }
+
+    return map
   }
 
   async update(id: number, data: { content: string; previousContent: string }): Promise<Message> {

@@ -28,6 +28,8 @@ import { ChatRoom } from '@/modules/chat/entities/chat-room.entity'
 import { ChatRoomMember } from '@/modules/chat/entities/chat-room-member.entity'
 import { MessageReaction } from '@/modules/message_reactions/entities/message-reaction.entity'
 import { PinnedMessage } from '@/modules/pinned-messages/entities/pinned_message.entity'
+import { Meeting } from '@/modules/meetings/entities/meeting.entity'
+import { MeetingParticipant } from '@/modules/meetings/entities/meeting_participant.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -62,6 +64,8 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         ChatRoomMember,
         MessageReaction,
         PinnedMessage,
+        Meeting,
+        MeetingParticipant,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),
