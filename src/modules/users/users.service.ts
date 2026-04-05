@@ -466,6 +466,14 @@ export class UsersService {
   }
 
   /**
+   * Updates the last_seen_at timestamp for the given user.
+   * Intended to be called on every authenticated request (fire-and-forget).
+   */
+  async updateLastSeen(userId: number): Promise<void> {
+    await this.userRepository.update({ id: userId }, { last_seen_at: new Date() })
+  }
+
+  /**
    * Returns a map of userId → fcm_token for a list of user IDs.
    * Only includes users who have a non-null token.
    */
