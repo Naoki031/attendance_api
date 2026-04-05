@@ -13,6 +13,7 @@ import { ChatRoomService } from './chat-room.service'
 import { CreateChatRoomDto } from './dto/create-chat-room.dto'
 import { UpdateChatRoomDto } from './dto/update-chat-room.dto'
 import { InviteUserDto } from './dto/invite-user.dto'
+import { InviteUsersDto } from './dto/invite-users.dto'
 import { PinnedMessagesService } from '@/modules/pinned-messages/pinned-messages.service'
 import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
 import { User } from '@/modules/auth/decorators/user.decorator'
@@ -117,6 +118,17 @@ export class ChatRoomController {
     const room = await this.chatRoomService.findByUuid(uuid)
 
     return this.chatRoomService.invite(room.id, user.id, dto)
+  }
+
+  @Post(':uuid/invite-batch')
+  async inviteBatch(
+    @Param('uuid') uuid: string,
+    @Body(ValidationPipe) dto: InviteUsersDto,
+    @User() user: UserEntity,
+  ) {
+    const room = await this.chatRoomService.findByUuid(uuid)
+
+    return this.chatRoomService.inviteBatch(room.id, user.id, dto)
   }
 
   @Delete(':uuid/members/:userId')

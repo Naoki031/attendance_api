@@ -13,6 +13,7 @@ import { Message } from '../messages/entities/message.entity'
 import { CreateChatRoomDto } from './dto/create-chat-room.dto'
 import { UpdateChatRoomDto } from './dto/update-chat-room.dto'
 import { InviteUserDto } from './dto/invite-user.dto'
+import { InviteUsersDto } from './dto/invite-users.dto'
 
 @Injectable()
 export class ChatRoomService {
@@ -70,7 +71,12 @@ export class ChatRoomService {
         : (dto.visibility ?? ChatRoomVisibility.PUBLIC),
       creator_id: creatorId,
     })
-    const saved = await this.chatRoomRepository.save(room)
+    const saved = await this.chatRoomRepository.save(room).catch((error) => {
+      if (error?.code === 'ER_DUP_ENTRY') {
+        throw new BadRequestException('A room with this name already exists')
+      }
+      throw error
+    })
 
     await this.chatRoomMemberRepository.save({
       room_id: saved.id,
@@ -101,8 +107,8 @@ export class ChatRoomService {
       // Resolve group members and merge
       if (dto.groupIds && dto.groupIds.length > 0) {
         const groupUserRows = await this.chatRoomMemberRepository.query(
-          `SELECT DISTINCT user_id FROM user_groups WHERE group_id IN (?)`,
-          [dto.groupIds],
+          `SELECT DISTINCT user_id FROM user_groups WHERE group_id IN (${dto.groupIds.map(() => '?').join(',')})`,
+          dto.groupIds,
         )
 
         for (const row of groupUserRows) {
@@ -120,7 +126,11 @@ export class ChatRoomService {
       }
     }
 
-    return saved
+    // Reload with relations for complete response
+    return this.chatRoomRepository.findOne({
+      where: { id: saved.id },
+      relations: ['creator'],
+    }) as Promise<ChatRoom>
   }
 
   /**
@@ -362,6 +372,57 @@ export class ChatRoomService {
     })
 
     return this.chatRoomMemberRepository.save(member)
+  }
+
+  /**
+   * Batch invites multiple users (individually + via groups) to a room.
+   * Only room admins can invite. Skips users already in the room.
+   */
+  async inviteBatch(roomId: number, adminId: number, dto: InviteUsersDto): Promise<ChatRoomMember[]> {
+    await this.findOne(roomId)
+    await this.requireAdmin(roomId, adminId)
+
+    const userIds = new Set<number>()
+
+    // Add individually selected users
+    if (dto.user_ids) {
+      for (const userId of dto.user_ids) {
+        userIds.add(userId)
+      }
+    }
+
+    // Resolve group members and merge
+    if (dto.groupIds && dto.groupIds.length > 0) {
+      const groupUserRows = await this.chatRoomMemberRepository.query(
+        `SELECT DISTINCT user_id FROM user_groups WHERE group_id IN (${dto.groupIds.map(() => '?').join(',')})`,
+        dto.groupIds,
+      )
+
+      for (const row of groupUserRows) {
+        userIds.add(Number(row.user_id))
+      }
+    }
+
+    // Skip users already in the room
+    const existingMembers = await this.chatRoomMemberRepository.find({
+      where: { room_id: roomId },
+      select: ['user_id'],
+    })
+    const existingIds = new Set(existingMembers.map((member) => member.user_id))
+
+    const newUserIds = Array.from(userIds).filter((id) => !existingIds.has(id))
+
+    if (newUserIds.length === 0) return []
+
+    const members = newUserIds.map((userId) =>
+      this.chatRoomMemberRepository.create({
+        room_id: roomId,
+        user_id: userId,
+        role: ChatRoomMemberRole.MEMBER,
+      }),
+    )
+
+    return this.chatRoomMemberRepository.save(members)
   }
 
   /**
