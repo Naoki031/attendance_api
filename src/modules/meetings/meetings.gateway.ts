@@ -11,6 +11,7 @@ import type { Server, Socket } from 'socket.io'
 import { Logger } from '@nestjs/common'
 import { MeetingsService } from './meetings.service'
 import { SpeechService } from './speech.service'
+import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 
 // Common Whisper hallucination patterns — generated when audio is silence/noise
 const HALLUCINATION_PATTERNS = [
@@ -18,21 +19,49 @@ const HALLUCINATION_PATTERNS = [
   /^(please (like|subscribe|share)[.!]?)+$/i,
   /^(\[music\]|\[noise\]|\[silence\]|\[applause\]|\[laughter\])+$/i,
   /^(subtitles? (by|from)[^.]+[.!]?)+$/i,
+  /^(you\s*)+$/i,
+  /^(the\s+end[.!]?)+$/i,
+  /^(this\s+is\s+a\s+(test|recording)[^.]*[.!]?)+$/i,
+  /^(so\s+|um\s+|uh\s+)+$/i,
+  /^(hello[.!]?\s*)+$/i,
+  /^(bye[.!]?\s*)+$/i,
+  /^(mmm+\s*)+$/i,
+  /^(hm+\s*)+$/i,
+  /^(thank(s|\s+you)?[.!]?\s*)+$/i,
+  /^(okay[.!]?\s*)+$/i,
+  /^(sure[.!]?\s*)+$/i,
+  /^(yes[.!]?\s*)+$/i,
+  /^(right[.!]?\s*)+$/i,
+  /^(i\s+see[.!]?\s*)+$/i,
+  /^(of\s+course[.!]?\s*)+$/i,
+  /^(let's?\s+(start|begin|go|continue)[^.]*[.!]?)+$/i,
+  /^(how\s+are\s+you[^.]*[.!]?)+$/i,
+]
+
+// Common filler/noise words in vi/ja that Whisper produces from silence
+const FILLER_PATTERNS = [
+  /^(\s*(dạ|vâng|ạ|à|ừ|ờ|ừm|ờm|hmm|mm|aha|ha)\s*[.!]?\s*)+$/i,
+  /^(\s*(はい|ええ|うん|あの|えーっと|そうですか|わかりました)\s*[.!?]?\s*)+$/,
+  // Short Japanese phrases that Whisper hallucinates from silence/noise
+  /^(はい、?\s*(よろしく|おねがい|わかりま)[^。]*。?\s*)+$/,
 ]
 
 function isWhisperHallucination(text: string): boolean {
   const trimmed = text.trim()
 
-  // Detect 3+ consecutive repeated words: "Jesus Jesus Jesus..." or "No No No No..."
+  // Too short to be meaningful
+  if (trimmed.length < 3) return true
+
+  // Detect 3+ consecutive repeated words
   const words = trimmed.split(/\s+/)
 
   for (let index = 0; index < words.length - 2; index++) {
-    const word = words[index].toLowerCase().replace(/[^a-z]/g, '')
+    const word = words[index]!.toLowerCase().replace(/[^a-z]/g, '')
 
     if (
       word.length > 1 &&
-      word === words[index + 1].toLowerCase().replace(/[^a-z]/g, '') &&
-      word === words[index + 2].toLowerCase().replace(/[^a-z]/g, '')
+      word === words[index + 1]!.toLowerCase().replace(/[^a-z]/g, '') &&
+      word === words[index + 2]!.toLowerCase().replace(/[^a-z]/g, '')
     ) {
       return true
     }
@@ -40,6 +69,11 @@ function isWhisperHallucination(text: string): boolean {
 
   // Detect known hallucination phrases
   for (const pattern of HALLUCINATION_PATTERNS) {
+    if (pattern.test(trimmed)) return true
+  }
+
+  // Detect filler-only output (noise misrecognized as speech)
+  for (const pattern of FILLER_PATTERNS) {
     if (pattern.test(trimmed)) return true
   }
 
@@ -103,6 +137,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     private readonly meetingsService: MeetingsService,
     private readonly speechService: SpeechService,
+    private readonly slackChannelsService: SlackChannelsService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -313,7 +348,8 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     @MessageBody()
     payload: {
       meetingId: number
-      audioBase64: string
+      audioData?: ArrayBuffer
+      audioBase64?: string
       speakerLanguage?: string | null
       ttsEnabled?: boolean
       isScreenAudio?: boolean
@@ -322,11 +358,22 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     const participant = this.activeParticipants.get(payload.meetingId)?.get(client.id)
     if (!participant) return
 
-    // Skip if previous chunk is still being processed — prevents Whisper queue buildup
+    // Skip if previous chunk is still being processed — prevents queue buildup
     if (this.processingAudio.has(client.id)) return
 
-    const audioBuffer = Buffer.from(payload.audioBase64, 'base64')
+    // Accept binary (preferred) or base64 (backward compat)
+    const audioBuffer = payload.audioData
+      ? Buffer.from(payload.audioData)
+      : payload.audioBase64
+        ? Buffer.from(payload.audioBase64, 'base64')
+        : null
+
+    if (!audioBuffer) return
+
     const speakerLanguage = payload.speakerLanguage ?? undefined
+    this.logger.debug(
+      `[audio_stream] user=${participant.userId} lang=${speakerLanguage ?? 'auto'} bytes=${audioBuffer.length}`,
+    )
     const ttsEnabled = payload.ttsEnabled ?? false
     const isScreenAudio = payload.isScreenAudio ?? false
 
@@ -376,7 +423,13 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
           `[whisper] text="${text}" lang=${language} words=${text ? text.trim().split(/\s+/).length : 0}`,
         )
 
-        if (!text || text.trim().split(/\s+/).length < 2) {
+        // Skip empty or too-short text
+        // For CJK languages (no spaces), use character count (≥3 chars)
+        // For space-separated languages, use word count (≥2 words)
+        const hasCJK = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text)
+        const tooShort = hasCJK ? text.trim().length < 3 : text.trim().split(/\s+/).length < 2
+
+        if (!text || tooShort) {
           this.logger.debug(`[subtitle] skipped — too short or empty`)
         } else if (isWhisperHallucination(text)) {
           this.logger.debug(
@@ -416,6 +469,9 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         }
       } catch (error) {
         this.logger.error('Audio chunk processing failed', error)
+        this.slackChannelsService.sendSystemError(
+          `[Meeting] Audio chunk processing failed for meetingId=${meetingId} userId=${participant.userId}: ${(error as Error).message}`,
+        )
       } finally {
         // Drain queued chunk if any
         const queue = this.audioQueue.get(client.id)

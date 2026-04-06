@@ -6,7 +6,7 @@ order: 35
 ### For Admins (Management section):
 
 **Organization:**
-- **Users**: Manage employee accounts, assign departments, set device IDs for biometric sync. The **Skip Attendance** toggle excludes a user from attendance tracking — the auto-fill absences cron and ZK device sync will ignore them. Use this for test accounts, auditors, or anyone who doesn't need attendance tracking. The **Permanent Remote** toggle marks a user as permanently remote — they do not need to submit daily WFH requests. You can also set each user's **Preferred Language** (English, Vietnamese, or Japanese) for the UI.
+- **Users**: Manage employee accounts, assign departments, set device IDs for biometric sync. The **Skip Attendance** toggle excludes a user from attendance tracking — the auto-fill absences cron and ZK device sync will ignore them. Use this for test accounts, auditors, or anyone who doesn't need attendance tracking. The **Permanent Remote** toggle marks a user as permanently remote — they do not need to submit daily WFH requests and can clock in/out from anywhere. Each user row has action buttons: **Edit** (update profile), **Manage Departments** (assign/remove department), **Manage Work Schedule** (set a custom schedule or use company default), **Cancel KYC** (reset face registration so employee can re-submit), and **Delete**.
 - **Companies**: Configure company info, work hours (start/end time), allowed IP addresses for QR clock-in, and Google Calendar ID
 - **Departments**: Manage company departments
 - **Teams**: Create and manage cross-department teams for Slack group mentions. Go to **Management → Teams**.
@@ -22,7 +22,7 @@ order: 35
 
 **Requests:**
 - **Approvals**: Review and approve/reject pending employee requests. **Only designated company approvers** (configured per company via **Company → Manage Approvers**) can approve or reject requests. Other admins can view but cannot approve. Approved requests sync to Google Calendar and Google Sheets
-- **Request History**: View all past requests with filters
+- **Request History**: View all past requests with filters (month/year, status, request type). Click **Export Excel** to download the filtered list as a spreadsheet.
 - **Bug Reports**: View and manage bug reports submitted by users. You can update the status (pending/in progress/resolved) and add admin notes for tracking resolution progress. Each report includes the submitter's info, title, description, and optional screenshot.
 
 **Attendance:**

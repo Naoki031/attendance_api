@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { In, Repository } from 'typeorm'
 import { SlackChannel, SlackChannelFeature } from './entities/slack_channel.entity'
@@ -11,6 +11,8 @@ import { ConfigService } from '@nestjs/config'
 
 @Injectable()
 export class SlackChannelsService {
+  private readonly logger = new Logger(SlackChannelsService.name)
+
   constructor(
     @InjectRepository(SlackChannel)
     private readonly slackChannelRepository: Repository<SlackChannel>,
@@ -228,7 +230,7 @@ export class SlackChannelsService {
     try {
       await firstValueFrom(this.httpService.post(channel.webhook_url, { text: finalMessage }))
     } catch (error) {
-      console.error('Failed to send Slack message:', error)
+      this.logger.error('Failed to send Slack message', error)
     }
   }
 
@@ -295,7 +297,7 @@ export class SlackChannelsService {
     try {
       await firstValueFrom(this.httpService.post(webhookUrl, payload))
     } catch (error) {
-      console.error('Failed to send system error to Slack:', error)
+      this.logger.error('Failed to send system error to Slack', error)
     }
   }
 }

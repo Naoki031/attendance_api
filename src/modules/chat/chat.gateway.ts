@@ -9,6 +9,7 @@ import {
 } from '@nestjs/websockets'
 import type { Server, Socket } from 'socket.io'
 import { Logger } from '@nestjs/common'
+import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 import { ChatService } from './chat.service'
 import { ChatRoomService } from './chat-room.service'
 import { ChatRoomType, ChatRoomVisibility } from './entities/chat-room.entity'
@@ -83,6 +84,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly usersService: UsersService,
     private readonly messageReactionsService: MessageReactionsService,
     private readonly pinnedMessagesService: PinnedMessagesService,
+    private readonly slackChannelsService: SlackChannelsService,
   ) {}
 
   @WebSocketServer()
@@ -298,6 +300,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         .catch((error) => this.logger.error('Background translation failed', error))
     } catch (error) {
       this.logger.error('Failed to send message', error)
+      this.slackChannelsService.sendSystemError(
+        `[Chat] Failed to send message in room ${payload.roomUuid} by userId=${user.userId}: ${(error as Error).message}`,
+      )
       client.emit('error', { message: 'Failed to send message' })
     }
   }
@@ -366,6 +371,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         .catch((error) => this.logger.error('Background translation failed', error))
     } catch (error) {
       this.logger.error('Failed to edit message', error)
+      this.slackChannelsService.sendSystemError(
+        `[Chat] Failed to edit messageId=${messageId} in room ${payload.roomUuid} by userId=${user.userId}: ${(error as Error).message}`,
+      )
       const errorMessage = error instanceof Error ? error.message : 'Failed to edit message'
       client.emit('error', { message: errorMessage })
     }
@@ -456,6 +464,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         .catch((error) => this.logger.error('Background translation failed', error))
     } catch (error) {
       this.logger.error('Failed to send thread reply', error)
+      this.slackChannelsService.sendSystemError(
+        `[Chat] Failed to send thread reply in room ${payload.roomUuid} parentId=${payload.parentMessageId} by userId=${user.userId}: ${(error as Error).message}`,
+      )
       client.emit('error', { message: 'Failed to send thread reply' })
     }
   }

@@ -25,13 +25,7 @@ export class PermissionsController {
   @Post()
   @Permissions('create')
   create(@Body(ValidationPipe) createPermissionDto: CreatePermissionDto) {
-    try {
-      return this.permissionsService.create(createPermissionDto)
-    } catch (error) {
-      console.error('Error creating permission:', error)
-
-      throw error
-    }
+    return this.permissionsService.create(createPermissionDto)
   }
 
   @Get()
@@ -56,13 +50,7 @@ export class PermissionsController {
     @Param('id', ParseIntPipe) permissionId: number,
     @Body() updatePermissionDto: UpdatePermissionDto,
   ) {
-    try {
-      return this.permissionsService.update(permissionId, updatePermissionDto)
-    } catch (error) {
-      console.error('Error updating role:', error)
-
-      throw error
-    }
+    return this.permissionsService.update(permissionId, updatePermissionDto)
   }
 
   @Delete(':id')

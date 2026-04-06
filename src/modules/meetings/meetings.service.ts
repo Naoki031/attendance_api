@@ -146,8 +146,10 @@ export class MeetingsService {
     if (dto.meeting_type !== undefined) meeting.meeting_type = dto.meeting_type
     if (dto.scheduled_at !== undefined) meeting.scheduled_at = new Date(dto.scheduled_at)
     if (dto.schedule_time !== undefined) meeting.schedule_time = dto.schedule_time
-    if (dto.schedule_day_of_week !== undefined) meeting.schedule_day_of_week = dto.schedule_day_of_week
-    if (dto.schedule_interval_weeks !== undefined) meeting.schedule_interval_weeks = dto.schedule_interval_weeks
+    if (dto.schedule_day_of_week !== undefined)
+      meeting.schedule_day_of_week = dto.schedule_day_of_week
+    if (dto.schedule_interval_weeks !== undefined)
+      meeting.schedule_interval_weeks = dto.schedule_interval_weeks
 
     if (dto.is_private !== undefined) {
       meeting.is_private = dto.is_private

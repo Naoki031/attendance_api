@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { In, Repository } from 'typeorm'
 import { FilterEmployeeRequestDto } from './dto/filter-employee_request.dto'
@@ -26,6 +26,8 @@ import { AttendanceLogsService } from '@/modules/attendance_logs/attendance_logs
 
 @Injectable()
 export class EmployeeRequestsService {
+  private readonly logger = new Logger(EmployeeRequestsService.name)
+
   constructor(
     @InjectRepository(EmployeeRequest)
     private readonly employeeRequestRepository: Repository<EmployeeRequest>,
@@ -425,7 +427,7 @@ export class EmployeeRequestsService {
           clockTime,
         )
       } catch (error) {
-        console.error('[CLOCK_FORGET] Failed to apply to attendance log:', error)
+        this.logger.error('[CLOCK_FORGET] Failed to apply to attendance log', error)
         await this.slackChannelsService.sendSystemError(
           `[CLOCK_FORGET] Failed to apply attendance log for request #${request.id} (user_id: ${request.user_id}, date: ${request.forget_date}): ${(error as Error).message}`,
         )

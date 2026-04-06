@@ -8,9 +8,14 @@ import { MeetingsGateway } from './meetings.gateway'
 import { TtsService } from './tts.service'
 import { SpeechService } from './speech.service'
 import { TranslateModule } from '@/modules/translate/translate.module'
+import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Meeting, MeetingParticipant]), TranslateModule],
+  imports: [
+    TypeOrmModule.forFeature([Meeting, MeetingParticipant]),
+    TranslateModule,
+    SlackChannelsModule,
+  ],
   controllers: [MeetingsController],
   providers: [MeetingsService, MeetingsGateway, TtsService, SpeechService],
   exports: [MeetingsService],

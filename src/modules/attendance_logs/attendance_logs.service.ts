@@ -28,6 +28,7 @@ import { GoogleSheetsService } from '@/modules/google_sheets/google_sheets.servi
 import type { ColumnConfigItem } from '@/modules/google_sheets/entities/company_google_sheet.entity'
 import { FaceService } from '@/modules/face/face.service'
 import { StorageService } from '@/modules/storage/storage.service'
+import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 
 export interface FaceCheckinResult {
   success: boolean
@@ -94,6 +95,7 @@ export class AttendanceLogsService {
     private readonly configService: ConfigService,
     private readonly faceService: FaceService,
     private readonly storageService: StorageService,
+    private readonly slackChannelsService: SlackChannelsService,
   ) {}
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -731,6 +733,9 @@ export class AttendanceLogsService {
       ])
     } catch (error) {
       this.logger.error('Failed to export attendance logs to Google Sheets', error)
+      this.slackChannelsService.sendSystemError(
+        `[AttendanceLogs] Failed to export attendance logs to Google Sheets: ${(error as Error).message}`,
+      )
       throw new BadRequestException('Failed to write to Google Sheets')
     }
 
@@ -826,6 +831,9 @@ export class AttendanceLogsService {
           filled++
         } catch (error) {
           this.logger.error(`[AUTO-FILL] Failed to fill absence for user ${userId}`, error)
+          this.slackChannelsService.sendSystemError(
+            `[AttendanceLogs] Auto-fill absence failed for userId=${userId} date=${date}: ${(error as Error).message}`,
+          )
         }
       }
     }

@@ -24,14 +24,8 @@ export class RolesController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createRoleDto: CreateRoleDto) {
-    try {
-      return await this.rolesService.create(createRoleDto)
-    } catch (error) {
-      console.error('Error creating role:', error)
-
-      throw error
-    }
+  create(@Body(ValidationPipe) createRoleDto: CreateRoleDto) {
+    return this.rolesService.create(createRoleDto)
   }
 
   @Get()
@@ -52,17 +46,11 @@ export class RolesController {
 
   @Put(':id')
   @Permissions('update')
-  async update(
+  update(
     @Param('id', ParseIntPipe) roleId: number,
     @Body(ValidationPipe) updateRoleDto: UpdateRoleDto,
   ) {
-    try {
-      return await this.rolesService.update(+roleId, updateRoleDto)
-    } catch (error) {
-      console.error('Error updating role:', error)
-
-      throw error
-    }
+    return this.rolesService.update(+roleId, updateRoleDto)
   }
 
   @Delete(':id')

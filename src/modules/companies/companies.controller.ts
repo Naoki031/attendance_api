@@ -25,13 +25,8 @@ export class CompaniesController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createCompanyDto: CreateCompanyDto) {
-    try {
-      return await this.companiesService.create(createCompanyDto)
-    } catch (error) {
-      console.error('Error creating company:', error)
-      throw error
-    }
+  create(@Body(ValidationPipe) createCompanyDto: CreateCompanyDto) {
+    return this.companiesService.create(createCompanyDto)
   }
 
   @Get()

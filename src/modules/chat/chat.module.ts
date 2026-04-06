@@ -14,8 +14,7 @@ import { FirebaseModule } from '@/modules/firebase/firebase.module'
 import { UsersModule } from '@/modules/users/users.module'
 import { MessageReactionsModule } from '@/modules/message_reactions/message-reactions.module'
 import { PinnedMessagesModule } from '@/modules/pinned-messages/pinned-messages.module'
-// TODO: Import when module is ready:
-// import { GlossaryModule } from '../glossary/glossary.module'
+import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
 
 @Module({
   imports: [
@@ -27,7 +26,7 @@ import { PinnedMessagesModule } from '@/modules/pinned-messages/pinned-messages.
     UsersModule,
     MessageReactionsModule,
     PinnedMessagesModule,
-    // GlossaryModule,
+    SlackChannelsModule,
   ],
   controllers: [ChatRoomController],
   providers: [ChatService, ChatRoomService, ChatGateway],

@@ -9,6 +9,7 @@ import {
   ColumnConfigItem,
   REQUEST_TYPE_ALL,
 } from './entities/company_google_sheet.entity'
+import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 
 /** Default column layout — mirrors the original hardcoded A–N mapping */
 export const DEFAULT_COLUMN_CONFIG: ColumnConfigItem[] = [
@@ -49,6 +50,7 @@ export class GoogleSheetsService {
     private readonly configService: ConfigService,
     @InjectRepository(CompanyGoogleSheet)
     private readonly companyGoogleSheetRepository: Repository<CompanyGoogleSheet>,
+    private readonly slackChannelsService: SlackChannelsService,
   ) {
     this.initialize()
   }
@@ -372,6 +374,9 @@ export class GoogleSheetsService {
       return null
     } catch (error) {
       this.logger.error('Failed to append request row to Google Sheets', error)
+      this.slackChannelsService.sendSystemError(
+        `[GoogleSheets] Failed to append request row for requestId=${request.id} companyId=${companyId}: ${(error as Error).message}`,
+      )
       return null
     }
   }

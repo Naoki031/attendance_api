@@ -24,13 +24,8 @@ export class GroupsController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createGroupDto: CreateGroupDto) {
-    try {
-      return await this.groupsService.create(createGroupDto)
-    } catch (error) {
-      console.error('Error creating group:', error)
-      throw error
-    }
+  create(@Body(ValidationPipe) createGroupDto: CreateGroupDto) {
+    return this.groupsService.create(createGroupDto)
   }
 
   @Get()
@@ -68,16 +63,11 @@ export class GroupsController {
 
   @Post(':id/members')
   @Permissions('update')
-  async addMember(
+  addMember(
     @Param('id', ParseIntPipe) groupId: number,
     @Body(ValidationPipe) createUserGroupDto: CreateUserGroupDto,
   ) {
-    try {
-      return await this.groupsService.addMember(groupId, createUserGroupDto)
-    } catch (error) {
-      console.error('Error adding member to group:', error)
-      throw error
-    }
+    return this.groupsService.addMember(groupId, createUserGroupDto)
   }
 
   @Delete(':id/members/:memberId')

@@ -378,7 +378,11 @@ export class ChatRoomService {
    * Batch invites multiple users (individually + via groups) to a room.
    * Only room admins can invite. Skips users already in the room.
    */
-  async inviteBatch(roomId: number, adminId: number, dto: InviteUsersDto): Promise<ChatRoomMember[]> {
+  async inviteBatch(
+    roomId: number,
+    adminId: number,
+    dto: InviteUsersDto,
+  ): Promise<ChatRoomMember[]> {
     await this.findOne(roomId)
     await this.requireAdmin(roomId, adminId)
 

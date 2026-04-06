@@ -24,14 +24,8 @@ export class CountriesController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createCountryDto: CreateCountryDto) {
-    try {
-      return await this.countriesService.create(createCountryDto)
-    } catch (error) {
-      console.error('Error creating country:', error)
-
-      throw error
-    }
+  create(@Body(ValidationPipe) createCountryDto: CreateCountryDto) {
+    return this.countriesService.create(createCountryDto)
   }
 
   @Get()

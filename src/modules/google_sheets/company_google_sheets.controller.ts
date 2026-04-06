@@ -23,13 +23,8 @@ export class CompanyGoogleSheetsController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createDto: CreateCompanyGoogleSheetDto) {
-    try {
-      return await this.companyGoogleSheetsService.create(createDto)
-    } catch (error) {
-      console.error('Error creating company Google Sheet config:', error)
-      throw error
-    }
+  create(@Body(ValidationPipe) createDto: CreateCompanyGoogleSheetDto) {
+    return this.companyGoogleSheetsService.create(createDto)
   }
 
   @Get()

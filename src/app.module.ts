@@ -4,10 +4,6 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module'
 import { ScheduleModule } from '@nestjs/schedule'
 import { DatabaseModule } from './core/database/database.module'
 import { CountriesModule } from './modules/countries/countries.module'
-// import { RolesModule } from './modules/roles/roles.module';
-// import { AuthService } from './modules/auth/auth.service';
-// import { AuthModule } from './modules/auth/auth.module';
-// import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module'
 import { PermissionsModule } from './modules/permissions/permissions.module'
 import { UsersModule } from './modules/users/users.module'
@@ -74,7 +70,6 @@ import { LastSeenInterceptor } from '@/modules/users/interceptors/last-seen.inte
     FaceModule,
     FeaturesModule,
     MeetingsModule,
-    // EmployeesModule,
   ],
   providers: [
     {
@@ -87,7 +82,5 @@ import { LastSeenInterceptor } from '@/modules/users/interceptors/last-seen.inte
     },
     JwtStrategy,
   ],
-  // controllers: [AppController],
-  // providers: [AppService],
 })
 export class AppModule {}

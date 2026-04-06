@@ -72,9 +72,8 @@ export class PermissionGroup {
     if (typeof this.permissions === 'string') {
       try {
         this.permissions = JSON.parse(this.permissions)
-      } catch (error) {
-        console.error('Failed to parse permissions:', error)
-        throw error
+      } catch {
+        // permissions column contains invalid JSON — leave as-is and let caller handle
       }
     }
   }

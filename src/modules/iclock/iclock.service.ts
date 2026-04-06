@@ -4,6 +4,7 @@ import { Repository } from 'typeorm'
 import * as momentTimezone from 'moment-timezone'
 import { User } from '@/modules/users/entities/user.entity'
 import { AttendanceLogsService } from '@/modules/attendance_logs/attendance_logs.service'
+import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 
 export interface AttlogRecord {
   pin: number
@@ -26,6 +27,7 @@ export class IclockService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly attendanceLogsService: AttendanceLogsService,
+    private readonly slackChannelsService: SlackChannelsService,
   ) {}
 
   /**
@@ -115,6 +117,9 @@ export class IclockService {
         result.saved++
       } catch (error) {
         this.logger.error(`[ICLOCK] Failed to save record for PIN=${record.pin}`, error)
+        this.slackChannelsService.sendSystemError(
+          `[ICLOCK] Failed to save attendance record for PIN=${record.pin} date=${record.date}: ${(error as Error).message}`,
+        )
         result.skipped++
       }
     }

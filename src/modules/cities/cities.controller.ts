@@ -24,13 +24,8 @@ export class CitiesController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createCityDto: CreateCityDto) {
-    try {
-      return await this.citiesService.create(createCityDto)
-    } catch (error) {
-      console.error('Error creating city:', error)
-      throw error
-    }
+  create(@Body(ValidationPipe) createCityDto: CreateCityDto) {
+    return this.citiesService.create(createCityDto)
   }
 
   @Get()

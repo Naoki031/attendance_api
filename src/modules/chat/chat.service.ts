@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { TranslateService } from '../translate/translate.service'
 import { MessagesService } from '../messages/messages.service'
-// TODO: Import when ready:
-// import { GlossaryService } from '../glossary/glossary.service'
 
 const SUPPORTED_LANGUAGES = ['en', 'vi', 'ja']
 
@@ -31,9 +29,6 @@ export class ChatService {
 
   private async getGlossaryTerms(_roomId: number): Promise<string[]> {
     try {
-      // TODO: Replace with actual GlossaryService when ready
-      // const glossary = await this.glossaryService.getTermsByRoom(roomId)
-      // return glossary
       return []
     } catch (error) {
       this.logger.error('Failed to get glossary terms', error)

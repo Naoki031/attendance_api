@@ -14,6 +14,7 @@ import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_wo
 import { GoogleSheetsModule } from '@/modules/google_sheets/google_sheets.module'
 import { FaceModule } from '@/modules/face/face.module'
 import { StorageModule } from '@/modules/storage/storage.module'
+import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { StorageModule } from '@/modules/storage/storage.module'
     GoogleSheetsModule,
     FaceModule,
     StorageModule,
+    SlackChannelsModule,
   ],
   controllers: [AttendanceLogsController],
   providers: [AttendanceLogsService],

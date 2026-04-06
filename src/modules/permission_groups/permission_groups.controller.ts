@@ -24,12 +24,7 @@ export class PermissionGroupsController {
 
   @Post()
   create(@Body(ValidationPipe) createPermissionGroupDto: CreatePermissionGroupDto) {
-    try {
-      return this.permissionGroupsService.create(createPermissionGroupDto)
-    } catch (error) {
-      console.error('Error creating permission group:', error)
-      throw error
-    }
+    return this.permissionGroupsService.create(createPermissionGroupDto)
   }
 
   @Get()
@@ -54,13 +49,7 @@ export class PermissionGroupsController {
     @Param('id', ParseIntPipe) permissionGroupId: number,
     @Body(ValidationPipe) updatePermissionGroupDto: UpdatePermissionGroupDto,
   ) {
-    try {
-      return this.permissionGroupsService.update(permissionGroupId, updatePermissionGroupDto)
-    } catch (error) {
-      console.error('Error updating permission group:', error)
-
-      throw error
-    }
+    return this.permissionGroupsService.update(permissionGroupId, updatePermissionGroupDto)
   }
 
   @Delete(':id')

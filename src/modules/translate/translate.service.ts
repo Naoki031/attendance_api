@@ -111,6 +111,81 @@ export class TranslateService {
     if (targetLangs.length === 0) return {}
     if (text.length < 3 || this.isOnlyEmoji(text)) return {}
 
+    // Single batch API call for all target languages — 1 round-trip instead of N
+    const truncated =
+      text.length > this.maxInputLength ? text.substring(0, this.maxInputLength) : text
+
+    const glossarySection =
+      glossaryTerms.length > 0
+        ? `\n- Glossary terms (translate consistently): ${glossaryTerms.join(', ')}`
+        : ''
+
+    const systemPrompt = [
+      `You are a professional translator. Translate the text inside <text> tags from ${sourceLang} to ALL of these languages: ${targetLangs.join(', ')}.`,
+      `- NEVER translate these IT terms, keep them as-is: ${IT_TERMS_PRESERVED}`,
+      glossarySection,
+      `- Return a JSON object with language codes as keys and translations as values.`,
+      `- Example: {"en": "Hello", "ja": "こんにちは"}`,
+      `- Return ONLY the JSON, no explanation, no markdown, no code fences.`,
+      `- Translate faithfully. Do NOT add, remove, or rephrase content.`,
+    ].join('\n')
+
+    const result = await this.tryTranslateWithModel(
+      this.model,
+      truncated,
+      targetLangs.join(','),
+      systemPrompt,
+      undefined,
+    )
+
+    if (!result) {
+      this.logger.warn(
+        'translateToMultiple — batch returned null, falling back to individual calls',
+      )
+
+      return this.translateToMultipleFallback(text, sourceLang, targetLangs, glossaryTerms, onChunk)
+    }
+
+    try {
+      // Strip markdown code fences if present
+      const cleaned = result
+        .replace(/^```(?:json)?\s*\n?/m, '')
+        .replace(/\n?```\s*$/m, '')
+        .trim()
+      const parsed = JSON.parse(cleaned) as Record<string, string>
+      const merged: Record<string, string> = {}
+
+      for (const lang of targetLangs) {
+        if (parsed[lang]) merged[lang] = parsed[lang]
+      }
+
+      if (Object.keys(merged).length === 0) {
+        this.logger.warn('translateToMultiple — batch JSON had no valid keys, falling back')
+
+        return this.translateToMultipleFallback(
+          text,
+          sourceLang,
+          targetLangs,
+          glossaryTerms,
+          onChunk,
+        )
+      }
+
+      return merged
+    } catch {
+      this.logger.warn('translateToMultiple — failed to parse batch JSON, falling back')
+
+      return this.translateToMultipleFallback(text, sourceLang, targetLangs, glossaryTerms, onChunk)
+    }
+  }
+
+  private async translateToMultipleFallback(
+    text: string,
+    sourceLang: string,
+    targetLangs: string[],
+    glossaryTerms: string[],
+    onChunk?: (lang: string, chunk: string) => void,
+  ): Promise<Record<string, string>> {
     const results = await Promise.all(
       targetLangs.map((lang) =>
         this.translateToSingle(

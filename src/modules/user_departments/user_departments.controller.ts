@@ -24,13 +24,8 @@ export class UserDepartmentsController {
 
   @Post()
   @Permissions('create')
-  async create(@Body(ValidationPipe) createDto: CreateUserDepartmentDto) {
-    try {
-      return await this.userDepartmentsService.create(createDto)
-    } catch (error) {
-      console.error('Error creating user-department assignment:', error)
-      throw error
-    }
+  create(@Body(ValidationPipe) createDto: CreateUserDepartmentDto) {
+    return this.userDepartmentsService.create(createDto)
   }
 
   @Get()

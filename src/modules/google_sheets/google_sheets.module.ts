@@ -6,12 +6,14 @@ import { CompanyGoogleSheetsService } from './company_google_sheets.service'
 import { CompanyGoogleSheetsController } from './company_google_sheets.controller'
 import { CompanyGoogleSheet } from './entities/company_google_sheet.entity'
 import { UserGroupPermissionsModule } from '../user_group_permissions/user_group_permissions.module'
+import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
 
 @Module({
   imports: [
     ConfigModule,
     TypeOrmModule.forFeature([CompanyGoogleSheet]),
     UserGroupPermissionsModule,
+    SlackChannelsModule,
   ],
   providers: [GoogleSheetsService, CompanyGoogleSheetsService],
   controllers: [CompanyGoogleSheetsController],
