@@ -227,10 +227,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('typing')
-  async handleTyping(
-    @MessageBody() payload: TypingPayload,
-    @ConnectedSocket() client: Socket,
-  ) {
+  async handleTyping(@MessageBody() payload: TypingPayload, @ConnectedSocket() client: Socket) {
     const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
     if (!room) return
 

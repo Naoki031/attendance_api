@@ -279,10 +279,9 @@ export class TranslateService {
 
     try {
       // Use upsert to avoid unique constraint race conditions on concurrent edits
-      await this.translationCacheRepository.upsert(
-        { messageId, translations: merged },
-        ['messageId'],
-      )
+      await this.translationCacheRepository.upsert({ messageId, translations: merged }, [
+        'messageId',
+      ])
     } catch (error) {
       this.logger.error('Failed to save translation cache', error)
     }

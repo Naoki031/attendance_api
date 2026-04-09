@@ -106,6 +106,38 @@ interface SubtitlePartialPayload {
   language: string
 }
 
+interface AnnotationDrawPayload {
+  meetingId: number
+  id: string
+  userId: number
+  color: string
+  lineWidth: number
+  points: Array<{ x: number; y: number }>
+  timestamp: number
+}
+
+interface AnnotationClearPayload {
+  meetingId: number
+}
+
+interface VoteOptionPayload {
+  id: string
+  text: string
+}
+
+interface MeetingVotePayload {
+  id: string
+  createdBy: number
+  creatorName: string
+  question: string
+  options: VoteOptionPayload[]
+  type: 'single' | 'multiple' | 'story_point'
+  votes: Record<number, string[]>
+  participantIds: number[]
+  status: 'active' | 'closed'
+  createdAt: number
+}
+
 interface SubtitleUpdatePayload {
   id: string
   meetingId: number
@@ -133,6 +165,8 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   // socketId → queue of pending audio chunks (max 2 buffered to bound latency)
   private readonly audioQueue = new Map<string, Buffer[]>()
   private readonly processingAudio = new Set<string>()
+  // meetingId → active votes (ephemeral, cleared when meeting resets)
+  private readonly activeVotes = new Map<number, MeetingVotePayload[]>()
 
   constructor(
     private readonly meetingsService: MeetingsService,
@@ -171,6 +205,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         // Auto-reset to scheduled when the last participant disconnects
         if (participants.size === 0) {
+          this.activeVotes.delete(meetingId)
           this.meetingsService
             .resetToScheduled(meetingId)
             .then(() => {
@@ -251,6 +286,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       speakerStates: speakerStatesSnapshot,
     })
 
+    // Send active votes so joining user sees ongoing votes
+    const activeVotesList = this.activeVotes.get(payload.meetingId) ?? []
+    if (activeVotesList.length > 0) {
+      client.emit('votes_state', activeVotesList)
+    }
+
     // Notify list page of updated live participants (covers 2nd, 3rd... joins)
     this.emitParticipantsUpdated(payload.meetingId)
 
@@ -323,6 +364,56 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     client.leave('meetings_list')
   }
 
+  @SubscribeMessage('end_meeting')
+  async handleEndMeeting(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { meetingId: number; userId: number },
+  ) {
+    const meeting = await this.meetingsService.findById(payload.meetingId).catch(() => null)
+
+    if (!meeting || meeting.host_id !== payload.userId) {
+      client.emit('error', { message: 'Only the host can end the meeting' })
+      return
+    }
+
+    const roomName = `meeting_${payload.meetingId}`
+
+    // Broadcast to everyone including host so all clients navigate away
+    this.server.to(roomName).emit('meeting_ended', { meetingId: payload.meetingId })
+
+    // Record leave for all active participants
+    const participants = this.activeParticipants.get(payload.meetingId)
+
+    if (participants) {
+      for (const participant of participants.values()) {
+        this.meetingsService.recordLeave(payload.meetingId, participant.userId).catch((error) => {
+          this.logger.error('Failed to record leave on end_meeting', error)
+        })
+      }
+
+      participants.clear()
+    }
+
+    this.speakerStates.get(payload.meetingId)?.clear()
+    this.activeVotes.delete(payload.meetingId)
+
+    // Reset status to scheduled
+    this.meetingsService
+      .resetToScheduled(payload.meetingId)
+      .then(() => {
+        this.server.to('meetings_list').emit('meeting_status_changed', {
+          meetingId: payload.meetingId,
+          status: 'scheduled',
+          activeUserIds: [],
+        })
+      })
+      .catch((error) => {
+        this.logger.error('Failed to reset meeting to scheduled after end_meeting', error)
+      })
+
+    this.logger.log(`Meeting ${payload.meetingId} ended by host ${payload.userId}`)
+  }
+
   @SubscribeMessage('speaker_state')
   handleSpeakerState(
     @ConnectedSocket() client: Socket,
@@ -340,6 +431,47 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       enabled: payload.enabled,
       meetingId: payload.meetingId,
     })
+  }
+
+  @SubscribeMessage('cursor_move')
+  handleCursorMove(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { meetingId: number; userId: number; x: number; y: number },
+  ) {
+    client.to(`meeting_${payload.meetingId}`).emit('cursor_move', payload)
+  }
+
+  @SubscribeMessage('cursor_hide')
+  handleCursorHide(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { meetingId: number; userId: number },
+  ) {
+    client.to(`meeting_${payload.meetingId}`).emit('cursor_hide', payload)
+  }
+
+  @SubscribeMessage('screen_marker')
+  handleScreenMarker(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      meetingId: number
+      id: string
+      userId: number
+      x: number
+      y: number
+      color: string
+      timestamp: number
+    },
+  ) {
+    client.to(`meeting_${payload.meetingId}`).emit('screen_marker', payload)
+  }
+
+  @SubscribeMessage('screen_marker_clear')
+  handleScreenMarkerClear(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { meetingId: number },
+  ) {
+    this.server.to(`meeting_${payload.meetingId}`).emit('screen_marker_clear')
   }
 
   @SubscribeMessage('audio_stream')
@@ -492,6 +624,117 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         }
       }
     })()
+  }
+
+  @SubscribeMessage('annotation_draw')
+  handleAnnotationDraw(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: AnnotationDrawPayload,
+  ) {
+    // Broadcast stroke to all other participants — sender renders locally without waiting
+    client.to(`meeting_${payload.meetingId}`).emit('annotation_draw', payload)
+  }
+
+  @SubscribeMessage('annotation_clear')
+  handleAnnotationClear(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: AnnotationClearPayload,
+  ) {
+    // Broadcast clear to all participants including sender for consistency
+    this.server.to(`meeting_${payload.meetingId}`).emit('annotation_clear')
+  }
+
+  @SubscribeMessage('vote_create')
+  handleVoteCreate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      meetingId: number
+      userId: number
+      creatorName: string
+      question: string
+      options: string[]
+      type: 'single' | 'multiple' | 'story_point'
+      participantIds: number[]
+    },
+  ) {
+    const vote: MeetingVotePayload = {
+      id: `vote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      createdBy: payload.userId,
+      creatorName: payload.creatorName,
+      question: payload.question,
+      options: payload.options.map((text, index) => ({
+        id: `opt-${index}`,
+        text,
+      })),
+      type: payload.type,
+      votes: {},
+      participantIds: payload.participantIds,
+      status: 'active',
+      createdAt: Date.now(),
+    }
+
+    if (!this.activeVotes.has(payload.meetingId)) {
+      this.activeVotes.set(payload.meetingId, [])
+    }
+
+    this.activeVotes.get(payload.meetingId)!.push(vote)
+
+    // Broadcast to all participants including sender
+    this.server.to(`meeting_${payload.meetingId}`).emit('vote_started', vote)
+  }
+
+  @SubscribeMessage('vote_cast')
+  handleVoteCast(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      meetingId: number
+      voteId: string
+      userId: number
+      optionIds: string[]
+    },
+  ) {
+    const votes = this.activeVotes.get(payload.meetingId)
+    if (!votes) return
+
+    const vote = votes.find((value) => value.id === payload.voteId)
+    if (!vote || vote.status !== 'active') return
+
+    // Check if user is allowed to vote (empty participantIds = everyone)
+    if (vote.participantIds.length > 0 && !vote.participantIds.includes(payload.userId)) return
+
+    const validIds = vote.options.map((option) => option.id)
+    const selectedIds = payload.optionIds.filter((id) => validIds.includes(id))
+
+    // Single choice: only one option allowed
+    if (vote.type === 'single' && selectedIds.length > 1) return
+    if (selectedIds.length === 0) return
+
+    // Record or update vote (allows changing selection while vote is active)
+    vote.votes[payload.userId] = selectedIds
+
+    // Broadcast updated vote to all participants
+    this.server.to(`meeting_${payload.meetingId}`).emit('vote_updated', vote)
+  }
+
+  @SubscribeMessage('vote_close')
+  handleVoteClose(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { meetingId: number; voteId: string; userId: number },
+  ) {
+    const votes = this.activeVotes.get(payload.meetingId)
+    if (!votes) return
+
+    const vote = votes.find((value) => value.id === payload.voteId)
+    if (!vote || vote.status !== 'active') return
+
+    // Only the creator can close the vote
+    if (vote.createdBy !== payload.userId) return
+
+    vote.status = 'closed'
+
+    this.server.to(`meeting_${payload.meetingId}`).emit('vote_ended', vote)
   }
 
   broadcastSubtitleUpdate(payload: SubtitleUpdatePayload) {

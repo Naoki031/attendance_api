@@ -15,6 +15,7 @@ export class SpeechService {
   private readonly logger = new Logger(SpeechService.name)
   private readonly whisperUrl: string
   private readonly groqApiKey: string | null = null
+  private readonly sttEnabled: boolean
 
   constructor(
     private readonly configService: ConfigService,
@@ -23,8 +24,11 @@ export class SpeechService {
   ) {
     this.whisperUrl = this.configService.get<string>('WHISPER_URL') ?? 'http://whisper:5001'
     this.groqApiKey = this.configService.get<string>('GROQ_API_KEY') ?? null
+    this.sttEnabled = this.configService.get<string>('STT_ENABLED') !== 'false'
 
-    if (this.groqApiKey) {
+    if (!this.sttEnabled) {
+      this.logger.warn('STT_ENABLED=false — speech-to-text transcription is disabled')
+    } else if (this.groqApiKey) {
       this.logger.log('Groq transcription enabled (primary) — local Whisper as fallback')
     } else {
       this.logger.log('Using local Whisper for transcription (no GROQ_API_KEY set)')
@@ -36,6 +40,10 @@ export class SpeechService {
     languageHint?: string,
     isScreenAudio = false,
   ): Promise<{ text: string; language: string }> {
+    if (!this.sttEnabled) {
+      return { text: '', language: languageHint ?? 'en' }
+    }
+
     // Groq: fast cloud transcription (~150-300ms) — skip ffmpeg, sends WebM directly
     if (this.groqApiKey) {
       try {
