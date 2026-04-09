@@ -14,6 +14,7 @@ import { CreateMeetingDto } from './dto/create-meeting.dto'
 import { UpdateMeetingDto } from './dto/update-meeting.dto'
 import { FilterMeetingDto } from './dto/filter-meeting.dto'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
+import { UsersService } from '@/modules/users/users.service'
 
 @Injectable()
 export class MeetingsService {
@@ -29,6 +30,7 @@ export class MeetingsService {
     @InjectRepository(MeetingCompany)
     private readonly meetingCompanyRepository: Repository<MeetingCompany>,
     private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
   ) {}
 
   async create(
@@ -112,15 +114,14 @@ export class MeetingsService {
       .leftJoin('meeting.pins', 'pin', 'pin.user_id = :userId', { userId })
       .addSelect('CASE WHEN pin.id IS NOT NULL THEN 1 ELSE 0 END', 'is_pinned_raw')
 
-    // Visibility: admins see all; regular users only see meetings for their companies
+    // Visibility: only show meetings whose company list includes one of the user's companies.
+    // Meetings with no company associations are not visible to any regular user.
     if (!isPrivileged) {
       query.andWhere(
-        `(
-          meeting.id IN (
-            SELECT mc.meeting_id FROM meeting_companies mc
-            INNER JOIN user_departments ud ON ud.company_id = mc.company_id
-            WHERE ud.user_id = :userId
-          )
+        `meeting.id IN (
+          SELECT mc.meeting_id FROM meeting_companies mc
+          INNER JOIN user_departments ud ON ud.company_id = mc.company_id
+          WHERE ud.user_id = :userId
         )`,
         { userId },
       )
@@ -187,6 +188,24 @@ export class MeetingsService {
     }
 
     return meeting
+  }
+
+  /**
+   * Returns users who belong to the companies associated with this meeting.
+   * Used to populate the host schedule user selector.
+   */
+  async findUsersForMeeting(uuid: string) {
+    const meeting = await this.meetingRepository.findOne({ where: { uuid } })
+    if (!meeting) throw new NotFoundException(`Meeting ${uuid} not found`)
+
+    const companyRows = await this.meetingCompanyRepository.find({
+      where: { meeting_id: meeting.id },
+    })
+    const companyIds = companyRows.map((row) => row.company_id)
+
+    if (companyIds.length === 0) return this.usersService.findAll()
+
+    return this.usersService.findWithFilters({ companyIds })
   }
 
   // Kept for internal use (e.g. recordLeave)

@@ -269,11 +269,13 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
             activeUserIds,
           })
 
-          // Resolve scheduled host for today and set as runtime host
+          // Resolve scheduled host for today and set as runtime host.
+          // When no schedule exists (null), fall back to the first joiner.
           const today = new Date().toISOString().slice(0, 10)
-          const resolvedHostId = await this.hostSchedulesService
+          const scheduledHostId = await this.hostSchedulesService
             .resolveHostForDate(payload.meetingId, today)
-            .catch(() => payload.userId)
+            .catch(() => null)
+          const resolvedHostId = scheduledHostId ?? payload.userId
           this.runtimeHosts.set(payload.meetingId, resolvedHostId)
           this.server.to(`meeting_${payload.meetingId}`).emit('host_changed', {
             meetingId: payload.meetingId,

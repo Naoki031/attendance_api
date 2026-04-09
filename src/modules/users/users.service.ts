@@ -94,6 +94,7 @@ export class UsersService {
     email?: string
     departmentId?: number
     companyId?: number
+    companyIds?: number[]
     role?: string
     status?: string
     contractType?: string
@@ -143,6 +144,13 @@ export class UsersService {
       queryBuilder.andWhere(
         'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id = :companyId)',
         { companyId: parameters.companyId },
+      )
+    }
+
+    if (parameters.companyIds?.length) {
+      queryBuilder.andWhere(
+        'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id IN (:...companyIds))',
+        { companyIds: parameters.companyIds },
       )
     }
 

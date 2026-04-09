@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common'
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  ConflictException,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { MeetingHostSchedule, HostScheduleType } from './entities/meeting_host_schedule.entity'
@@ -31,6 +36,8 @@ export class MeetingHostSchedulesService {
   ): Promise<MeetingHostSchedule> {
     const meeting = await this.findMeetingByUuid(meetingUuid)
     this.assertCanManage(meeting, requestUserId, isPrivileged)
+
+    await this.assertNoDuplicateDates(meeting.id, dto)
 
     const schedule = this.scheduleRepository.create({
       meeting_id: meeting.id,
@@ -88,6 +95,8 @@ export class MeetingHostSchedulesService {
     if (dto.recur_end_date !== undefined) schedule.recur_end_date = dto.recur_end_date
     if (dto.is_active !== undefined) schedule.is_active = dto.is_active
 
+    await this.assertNoDuplicateDates(meeting.id, schedule, schedule.id)
+
     await this.scheduleRepository.save(schedule)
     return this.scheduleRepository.findOne({
       where: { id: schedule.id },
@@ -112,7 +121,7 @@ export class MeetingHostSchedulesService {
    * Resolve which userId should be host for a given meeting on a given date.
    * Falls back to meeting.host_id (owner) when no schedule matches.
    */
-  async resolveHostForDate(meetingId: number, date: string): Promise<number> {
+  async resolveHostForDate(meetingId: number, date: string): Promise<number | null> {
     const meeting = await this.meetingRepository.findOne({ where: { id: meetingId } })
     if (!meeting) throw new NotFoundException(`Meeting #${meetingId} not found`)
 
@@ -122,7 +131,7 @@ export class MeetingHostSchedulesService {
 
     const matching = schedules.filter((schedule) => this.matchesDate(schedule, date))
 
-    if (matching.length === 0) return meeting.host_id
+    if (matching.length === 0) return null
 
     // Pick the most specific (highest priority). Tie-break: latest created_at.
     matching.sort((scheduleA, scheduleB) => {
@@ -137,7 +146,7 @@ export class MeetingHostSchedulesService {
   }
 
   /** Same as resolveHostForDate but accepts a meeting UUID — used by the HTTP endpoint. */
-  async resolveHostForDateByUuid(meetingUuid: string, date: string): Promise<number> {
+  async resolveHostForDateByUuid(meetingUuid: string, date: string): Promise<number | null> {
     const meeting = await this.findMeetingByUuid(meetingUuid)
 
     return this.resolveHostForDate(meeting.id, date)
@@ -198,6 +207,114 @@ export class MeetingHostSchedulesService {
 
       default:
         return false
+    }
+  }
+
+  /**
+   * Throws ConflictException if any date produced by the incoming schedule
+   * is already covered by another active schedule of the same meeting.
+   * Pass excludeId when updating so the schedule being edited is not checked against itself.
+   */
+  private async assertNoDuplicateDates(
+    meetingId: number,
+    incoming: {
+      schedule_type: HostScheduleType
+      date?: string | null
+      dates?: string[] | null
+      date_from?: string | null
+      date_to?: string | null
+      day_of_week?: number | null
+      interval_weeks?: number | null
+      recur_start_date?: string | null
+      recur_end_date?: string | null
+    },
+    excludeId?: number,
+  ): Promise<void> {
+    const existing = await this.scheduleRepository.find({
+      where: { meeting_id: meetingId, is_active: true },
+    })
+
+    const others = existing.filter((schedule) => schedule.id !== excludeId)
+    if (others.length === 0) return
+
+    const incomingDates = this.generateDates(incoming)
+    if (incomingDates.length === 0) return
+
+    for (const dateString of incomingDates) {
+      const conflict = others.find((schedule) => this.matchesDate(schedule, dateString))
+      if (conflict) {
+        throw new ConflictException(
+          `Date ${dateString} is already covered by another host schedule`,
+        )
+      }
+    }
+  }
+
+  /**
+   * Expands a schedule definition into a list of concrete date strings (YYYY-MM-DD).
+   * For recurring schedules, generates occurrences up to 2 years from recur_start_date.
+   */
+  private generateDates(schedule: {
+    schedule_type: HostScheduleType
+    date?: string | null
+    dates?: string[] | null
+    date_from?: string | null
+    date_to?: string | null
+    day_of_week?: number | null
+    interval_weeks?: number | null
+    recur_start_date?: string | null
+    recur_end_date?: string | null
+  }): string[] {
+    switch (schedule.schedule_type) {
+      case HostScheduleType.ONE_TIME:
+        return schedule.date ? [schedule.date] : []
+
+      case HostScheduleType.DATE_LIST:
+        return (schedule.dates ?? []).filter(Boolean) as string[]
+
+      case HostScheduleType.DATE_RANGE: {
+        if (!schedule.date_from || !schedule.date_to) return []
+        const result: string[] = []
+        const current = new Date(schedule.date_from + 'T00:00:00Z')
+        const end = new Date(schedule.date_to + 'T00:00:00Z')
+        while (current <= end) {
+          result.push(current.toISOString().slice(0, 10))
+          current.setUTCDate(current.getUTCDate() + 1)
+        }
+        return result
+      }
+
+      case HostScheduleType.RECURRING: {
+        if (
+          schedule.day_of_week === undefined ||
+          schedule.day_of_week === null ||
+          !schedule.interval_weeks ||
+          !schedule.recur_start_date
+        ) {
+          return []
+        }
+        const result: string[] = []
+        const anchor = new Date(schedule.recur_start_date + 'T00:00:00Z')
+        const daysUntilFirst = (schedule.day_of_week - anchor.getUTCDay() + 7) % 7
+        const current = new Date(anchor)
+        current.setUTCDate(current.getUTCDate() + daysUntilFirst)
+
+        const twoYearsLater = new Date(anchor)
+        twoYearsLater.setUTCFullYear(twoYearsLater.getUTCFullYear() + 2)
+        const endDate = schedule.recur_end_date
+          ? new Date(schedule.recur_end_date + 'T00:00:00Z')
+          : twoYearsLater
+        const cap = endDate < twoYearsLater ? endDate : twoYearsLater
+
+        while (current <= cap) {
+          result.push(current.toISOString().slice(0, 10))
+          current.setUTCDate(current.getUTCDate() + schedule.interval_weeks * 7)
+        }
+        return result
+      }
+
+      default:
+        return []
     }
   }
 

@@ -30,10 +30,9 @@ export class MeetingHostSchedulesController {
 
   @Get('resolve')
   resolve(@Param('uuid') uuid: string, @Query('date') date: string) {
-    const resolveDate = date ?? new Date().toISOString().slice(0, 10)
     return this.hostSchedulesService
-      .resolveHostForDateByUuid(uuid, resolveDate)
-      .then((userId) => ({ host_user_id: userId, date: resolveDate }))
+      .resolveHostForDateByUuid(uuid, date)
+      .then((userId) => ({ host_user_id: userId, date }))
   }
 
   @Post()

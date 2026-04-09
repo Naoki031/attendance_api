@@ -49,6 +49,7 @@ export class UsersController {
     @Query('email') email?: string,
     @Query('department_id') departmentId?: string,
     @Query('company_id') companyId?: string,
+    @Query('company_ids') companyIds?: string,
     @Query('role') role?: string,
     @Query('status') status?: string,
     @Query('contract_type') contractType?: string,
@@ -58,6 +59,13 @@ export class UsersController {
       return this.usersService.search(search)
     }
 
+    const parsedCompanyIds = companyIds
+      ? companyIds
+          .split(',')
+          .map((id) => parseInt(id, 10))
+          .filter((id) => !isNaN(id))
+      : undefined
+
     const hasFilter =
       userId ||
       name ||
@@ -65,6 +73,7 @@ export class UsersController {
       email ||
       departmentId ||
       companyId ||
+      companyIds ||
       role ||
       status ||
       contractType ||
@@ -78,6 +87,7 @@ export class UsersController {
         email,
         departmentId: departmentId ? parseInt(departmentId, 10) : undefined,
         companyId: companyId ? parseInt(companyId, 10) : undefined,
+        companyIds: parsedCompanyIds,
         role,
         status,
         contractType,

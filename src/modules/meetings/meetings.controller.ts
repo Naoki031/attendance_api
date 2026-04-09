@@ -59,6 +59,11 @@ export class MeetingsController {
     return this.meetingsService.findByUuid(uuid)
   }
 
+  @Get(':uuid/users')
+  findUsersForMeeting(@Param('uuid') uuid: string) {
+    return this.meetingsService.findUsersForMeeting(uuid)
+  }
+
   @Patch(':uuid')
   update(
     @Param('uuid') uuid: string,

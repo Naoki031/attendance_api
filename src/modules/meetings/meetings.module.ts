@@ -14,6 +14,7 @@ import { TtsService } from './tts.service'
 import { SpeechService } from './speech.service'
 import { TranslateModule } from '@/modules/translate/translate.module'
 import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
+import { UsersModule } from '@/modules/users/users.module'
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.mod
     ]),
     TranslateModule,
     SlackChannelsModule,
+    UsersModule,
   ],
   controllers: [MeetingsController, MeetingHostSchedulesController],
   providers: [
