@@ -19,6 +19,7 @@ import { UpdateMeetingDto } from './dto/update-meeting.dto'
 import { FilterMeetingDto } from './dto/filter-meeting.dto'
 import { User as UserDecorator } from '@/modules/auth/decorators/user.decorator'
 import type { User } from '@/modules/users/entities/user.entity'
+import { isPrivilegedUser } from './utils/is-privileged.utility'
 
 @Controller('meetings')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -34,8 +35,20 @@ export class MeetingsController {
   }
 
   @Get()
-  findAll(@Query() filter: FilterMeetingDto) {
-    return this.meetingsService.findAll(filter)
+  findAll(@Query() filter: FilterMeetingDto, @UserDecorator() user: User) {
+    return this.meetingsService.findAll(filter, user.id, user.roles)
+  }
+
+  @Post(':uuid/pin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  pin(@Param('uuid') uuid: string, @UserDecorator() user: User) {
+    return this.meetingsService.pin(uuid, user.id)
+  }
+
+  @Delete(':uuid/pin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  unpin(@Param('uuid') uuid: string, @UserDecorator() user: User) {
+    return this.meetingsService.unpin(uuid, user.id)
   }
 
   @Get(':uuid')
@@ -45,13 +58,13 @@ export class MeetingsController {
 
   @Patch(':uuid')
   update(@Param('uuid') uuid: string, @UserDecorator() user: User, @Body() dto: UpdateMeetingDto) {
-    return this.meetingsService.update(uuid, user.id, dto)
+    return this.meetingsService.update(uuid, user.id, dto, isPrivilegedUser(user.roles))
   }
 
   @Delete(':uuid')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('uuid') uuid: string, @UserDecorator() user: User) {
-    return this.meetingsService.remove(uuid, user.id)
+    return this.meetingsService.remove(uuid, user.id, user.roles)
   }
 
   @Post(':uuid/token')

@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsArray,
   Min,
   Max,
 } from 'class-validator'
@@ -50,4 +51,10 @@ export class UpdateMeetingDto {
   @Min(1)
   @Max(4)
   schedule_interval_weeks?: number
+
+  /** Replace the full list of company IDs this meeting is scoped to. */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  company_ids?: number[]
 }

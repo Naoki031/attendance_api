@@ -8,9 +8,12 @@ import { v4 as uuidv4 } from 'uuid'
 import * as bcrypt from 'bcrypt'
 import { Meeting, MeetingStatus, MeetingType } from './entities/meeting.entity'
 import { MeetingParticipant, MeetingParticipantRole } from './entities/meeting_participant.entity'
+import { MeetingPin } from './entities/meeting_pin.entity'
+import { MeetingCompany } from './entities/meeting_company.entity'
 import { CreateMeetingDto } from './dto/create-meeting.dto'
 import { UpdateMeetingDto } from './dto/update-meeting.dto'
 import { FilterMeetingDto } from './dto/filter-meeting.dto'
+import { isPrivilegedUser } from './utils/is-privileged.utility'
 
 @Injectable()
 export class MeetingsService {
@@ -21,6 +24,10 @@ export class MeetingsService {
     private readonly meetingRepository: Repository<Meeting>,
     @InjectRepository(MeetingParticipant)
     private readonly participantRepository: Repository<MeetingParticipant>,
+    @InjectRepository(MeetingPin)
+    private readonly meetingPinRepository: Repository<MeetingPin>,
+    @InjectRepository(MeetingCompany)
+    private readonly meetingCompanyRepository: Repository<MeetingCompany>,
     private readonly configService: ConfigService,
   ) {}
 
@@ -60,6 +67,13 @@ export class MeetingsService {
     })
     await this.participantRepository.save(participant)
 
+    // Resolve company IDs: use provided list or fall back to host's companies
+    const companyIds = dto.company_ids?.length
+      ? dto.company_ids
+      : await this.getCompanyIdsForUser(hostId)
+
+    await this.syncMeetingCompanies(saved.id, companyIds)
+
     return Object.assign(saved, { plain_password: plainPassword }) as Meeting & {
       plain_password?: string
     }
@@ -81,12 +95,36 @@ export class MeetingsService {
     return { plain_password: plainPassword }
   }
 
-  async findAll(filter: FilterMeetingDto): Promise<Meeting[]> {
+  async findAll(
+    filter: FilterMeetingDto,
+    userId: number,
+    userRoles: string[] = [],
+  ): Promise<(Meeting & { is_pinned: boolean })[]> {
+    const isPrivileged = isPrivilegedUser(userRoles)
+
     const query = this.meetingRepository
       .createQueryBuilder('meeting')
       .leftJoinAndSelect('meeting.host', 'host')
       .leftJoinAndSelect('meeting.participants', 'participants')
       .leftJoinAndSelect('participants.user', 'participantUser')
+      .leftJoinAndSelect('meeting.meeting_companies', 'meetingCompany')
+      .leftJoinAndSelect('meetingCompany.company', 'company')
+      .leftJoin('meeting.pins', 'pin', 'pin.user_id = :userId', { userId })
+      .addSelect('CASE WHEN pin.id IS NOT NULL THEN 1 ELSE 0 END', 'is_pinned_raw')
+
+    // Visibility: admins see all; regular users only see meetings for their companies
+    if (!isPrivileged) {
+      query.andWhere(
+        `(
+          meeting.id IN (
+            SELECT mc.meeting_id FROM meeting_companies mc
+            INNER JOIN user_departments ud ON ud.company_id = mc.company_id
+            WHERE ud.user_id = :userId
+          )
+        )`,
+        { userId },
+      )
+    }
 
     if (filter.status) {
       query.andWhere('meeting.status = :status', { status: filter.status })
@@ -96,9 +134,46 @@ export class MeetingsService {
       query.andWhere('meeting.title LIKE :search', { search: `%${filter.search}%` })
     }
 
-    query.orderBy('meeting.created_at', 'DESC')
+    query.orderBy('is_pinned_raw', 'DESC').addOrderBy('meeting.created_at', 'DESC')
 
-    return query.getMany()
+    const raws = await query.getRawAndEntities()
+
+    // Raw array may have more rows than entities due to leftJoinAndSelect on
+    // participants × companies producing duplicate rows. Build a map keyed by
+    // meeting ID so each entity gets its correct is_pinned value.
+    const pinnedMap = new Map<number, boolean>()
+    for (const raw of raws.raw as Record<string, unknown>[]) {
+      const meetingId = Number(raw['meeting_id'])
+      if (!pinnedMap.has(meetingId)) {
+        pinnedMap.set(meetingId, raw['is_pinned_raw'] === '1' || raw['is_pinned_raw'] === 1)
+      }
+    }
+
+    return raws.entities.map((meeting) =>
+      Object.assign(meeting, { is_pinned: pinnedMap.get(meeting.id) ?? false }),
+    )
+  }
+
+  /**
+   * Pins a meeting for the given user. Idempotent — safe to call if already pinned.
+   */
+  async pin(uuid: string, userId: number): Promise<void> {
+    const meeting = await this.findByUuid(uuid)
+    await this.meetingPinRepository
+      .createQueryBuilder()
+      .insert()
+      .into(MeetingPin)
+      .values({ user_id: userId, meeting_id: meeting.id })
+      .orIgnore()
+      .execute()
+  }
+
+  /**
+   * Unpins a meeting for the given user. Idempotent — safe to call if not pinned.
+   */
+  async unpin(uuid: string, userId: number): Promise<void> {
+    const meeting = await this.findByUuid(uuid)
+    await this.meetingPinRepository.delete({ user_id: userId, meeting_id: meeting.id })
   }
 
   async findByUuid(uuid: string): Promise<Meeting> {
@@ -128,9 +203,20 @@ export class MeetingsService {
     return meeting
   }
 
-  async update(uuid: string, userId: number, dto: UpdateMeetingDto): Promise<Meeting> {
+  /** Lightweight check that returns only host_id — avoids loading relations. */
+  async findHostIdById(id: number): Promise<number | null> {
+    const meeting = await this.meetingRepository.findOne({ where: { id }, select: ['host_id'] })
+    return meeting?.host_id ?? null
+  }
+
+  async update(
+    uuid: string,
+    userId: number,
+    dto: UpdateMeetingDto,
+    isPrivileged = false,
+  ): Promise<Meeting> {
     const meeting = await this.findByUuid(uuid)
-    this.assertHost(meeting, userId)
+    this.assertCanManage(meeting, userId, isPrivileged)
 
     if (dto.title !== undefined) meeting.title = dto.title
     if (dto.description !== undefined) meeting.description = dto.description
@@ -144,6 +230,7 @@ export class MeetingsService {
 
     if (dto.is_private !== undefined) {
       meeting.is_private = dto.is_private
+
       if (dto.is_private && dto.password) {
         meeting.password_hash = await bcrypt.hash(dto.password, 10)
       } else if (!dto.is_private) {
@@ -151,12 +238,27 @@ export class MeetingsService {
       }
     }
 
-    return this.meetingRepository.save(meeting)
+    const saved = await this.meetingRepository.save(meeting)
+
+    if (dto.company_ids !== undefined) {
+      await this.syncMeetingCompanies(meeting.id, dto.company_ids)
+    }
+
+    return saved
   }
 
-  async remove(uuid: string, userId: number): Promise<void> {
+  /**
+   * Deletes a meeting. Allowed for the host, admin, or super admin.
+   * Cannot delete a meeting that is currently active (has participants inside).
+   */
+  async remove(uuid: string, userId: number, roles: string[] = []): Promise<void> {
     const meeting = await this.findByUuid(uuid)
-    this.assertHost(meeting, userId)
+    this.assertHostOrAdmin(meeting, userId, roles)
+
+    if (meeting.status === MeetingStatus.ACTIVE) {
+      throw new ForbiddenException('Cannot delete a meeting that is currently active')
+    }
+
     await this.meetingRepository.remove(meeting)
   }
 
@@ -172,7 +274,9 @@ export class MeetingsService {
       if (!password) {
         throw new ForbiddenException('Password required to join private meeting')
       }
+
       const isValid = await bcrypt.compare(password, meeting.password_hash ?? '')
+
       if (!isValid) {
         throw new ForbiddenException('Incorrect meeting password')
       }
@@ -235,6 +339,20 @@ export class MeetingsService {
     )
   }
 
+  private assertHostOrAdmin(meeting: Meeting, userId: number, roles: string[] = []): void {
+    if (meeting.host_id === userId) return
+    if (isPrivilegedUser(roles)) return
+
+    throw new ForbiddenException('Only the host or an admin can perform this action')
+  }
+
+  private assertCanManage(meeting: Meeting, userId: number, isPrivileged: boolean): void {
+    if (isPrivileged) return
+    if (meeting.host_id !== userId) {
+      throw new ForbiddenException('Only the host or an admin can perform this action')
+    }
+  }
+
   private assertHost(meeting: Meeting, userId: number): void {
     if (meeting.host_id !== userId) {
       throw new ForbiddenException('Only the host can perform this action')
@@ -243,7 +361,29 @@ export class MeetingsService {
 
   private generateRandomPassword(): string {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
     return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+  }
+
+  /**
+   * Delete meetings whose last usage date (started_at) is more than 1 month ago.
+   * Runs at midnight every day.
+   */
+  @Cron('0 0 * * *')
+  async deleteOldMeetings(): Promise<void> {
+    const oneMonthAgo = new Date()
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
+
+    const oldMeetings = await this.meetingRepository
+      .createQueryBuilder('meeting')
+      .where('meeting.started_at < :oneMonthAgo', { oneMonthAgo })
+      .andWhere('meeting.status != :status', { status: MeetingStatus.ACTIVE })
+      .getMany()
+
+    if (oldMeetings.length === 0) return
+
+    await this.meetingRepository.remove(oldMeetings)
+    this.logger.log(`Deleted ${oldMeetings.length} old meeting(s) with last usage over 1 month ago`)
   }
 
   /**
@@ -268,5 +408,28 @@ export class MeetingsService {
         this.logger.warn(`Cleaned up stuck meeting #${meeting.id} (${meeting.uuid})`)
       }
     }
+  }
+
+  /**
+   * Returns all company IDs the user belongs to via user_departments.
+   */
+  private async getCompanyIdsForUser(userId: number): Promise<number[]> {
+    const rows = (await this.meetingRepository.manager.query(
+      'SELECT DISTINCT company_id FROM user_departments WHERE user_id = ?',
+      [userId],
+    )) as Array<{ company_id: number }>
+    return rows.map((row) => row.company_id)
+  }
+
+  /**
+   * Replaces all company associations for a meeting with the given list.
+   */
+  private async syncMeetingCompanies(meetingId: number, companyIds: number[]): Promise<void> {
+    await this.meetingCompanyRepository.delete({ meeting_id: meetingId })
+    if (companyIds.length === 0) return
+    const rows = companyIds.map((companyId) =>
+      this.meetingCompanyRepository.create({ meeting_id: meetingId, company_id: companyId }),
+    )
+    await this.meetingCompanyRepository.save(rows)
   }
 }

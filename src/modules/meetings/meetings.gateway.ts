@@ -10,6 +10,7 @@ import {
 import type { Server, Socket } from 'socket.io'
 import { Logger } from '@nestjs/common'
 import { MeetingsService } from './meetings.service'
+import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 import { SpeechService } from './speech.service'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 
@@ -86,6 +87,12 @@ interface JoinMeetingPayload {
   username: string
 }
 
+interface TransferHostPayload {
+  meetingId: number
+  fromUserId: number
+  toUserId: number
+}
+
 interface LeaveMeetingPayload {
   meetingId: number
   userId: number
@@ -155,21 +162,29 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   server: Server
 
   private readonly logger = new Logger(MeetingsGateway.name)
+
   // meetingId → Map<socketId, { userId, username }>
   private readonly activeParticipants = new Map<
     number,
     Map<string, { userId: number; username: string }>
   >()
+
   // meetingId → Map<userId, speakerEnabled>
   private readonly speakerStates = new Map<number, Map<number, boolean>>()
+
   // socketId → queue of pending audio chunks (max 2 buffered to bound latency)
   private readonly audioQueue = new Map<string, Buffer[]>()
   private readonly processingAudio = new Set<string>()
+
   // meetingId → active votes (ephemeral, cleared when meeting resets)
   private readonly activeVotes = new Map<number, MeetingVotePayload[]>()
 
+  // meetingId → userId of current runtime host (ephemeral, reset per session)
+  private readonly runtimeHosts = new Map<number, number>()
+
   constructor(
     private readonly meetingsService: MeetingsService,
+    private readonly hostSchedulesService: MeetingHostSchedulesService,
     private readonly speechService: SpeechService,
     private readonly slackChannelsService: SlackChannelsService,
   ) {}
@@ -206,6 +221,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         // Auto-reset to scheduled when the last participant disconnects
         if (participants.size === 0) {
           this.activeVotes.delete(meetingId)
+          this.runtimeHosts.delete(meetingId)
           this.meetingsService
             .resetToScheduled(meetingId)
             .then(() => {
@@ -243,7 +259,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (participants.length === 1) {
       this.meetingsService
         .setActive(payload.meetingId)
-        .then(() => {
+        .then(async () => {
           const activeUserIds = Array.from(
             this.activeParticipants.get(payload.meetingId)?.values() ?? [],
           ).map((participant) => participant.userId)
@@ -251,6 +267,17 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
             meetingId: payload.meetingId,
             status: 'active',
             activeUserIds,
+          })
+
+          // Resolve scheduled host for today and set as runtime host
+          const today = new Date().toISOString().slice(0, 10)
+          const resolvedHostId = await this.hostSchedulesService
+            .resolveHostForDate(payload.meetingId, today)
+            .catch(() => payload.userId)
+          this.runtimeHosts.set(payload.meetingId, resolvedHostId)
+          this.server.to(`meeting_${payload.meetingId}`).emit('host_changed', {
+            meetingId: payload.meetingId,
+            hostUserId: resolvedHostId,
           })
         })
         .catch((error) => {
@@ -268,6 +295,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // Build current speaker states snapshot for the joining user
     const speakerStatesSnapshot: Record<number, boolean> = {}
+
     for (const [userId, enabled] of this.speakerStates.get(payload.meetingId)!.entries()) {
       speakerStatesSnapshot[userId] = enabled
     }
@@ -279,15 +307,17 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       meetingId: payload.meetingId,
     })
 
-    // Send current participant list + speaker states to the joining user
+    // Send current participant list + speaker states + runtime host to the joining user
     client.emit('meeting_state', {
       meetingId: payload.meetingId,
       participants,
       speakerStates: speakerStatesSnapshot,
+      hostUserId: this.runtimeHosts.get(payload.meetingId) ?? null,
     })
 
     // Send active votes so joining user sees ongoing votes
     const activeVotesList = this.activeVotes.get(payload.meetingId) ?? []
+
     if (activeVotesList.length > 0) {
       client.emit('votes_state', activeVotesList)
     }
@@ -308,6 +338,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     const leaving = this.activeParticipants.get(payload.meetingId)?.get(client.id)
     this.activeParticipants.get(payload.meetingId)?.delete(client.id)
+
     if (leaving) {
       this.speakerStates.get(payload.meetingId)?.delete(leaving.userId)
     }
@@ -326,7 +357,9 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // Auto-reset to scheduled when the last participant leaves
     const remaining = this.activeParticipants.get(payload.meetingId)?.size ?? 0
+
     if (remaining === 0) {
+      this.runtimeHosts.delete(payload.meetingId)
       this.meetingsService
         .resetToScheduled(payload.meetingId)
         .then(() => {
@@ -349,6 +382,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // Send current live state so client can show correct status without reload
     const liveState: Record<number, number[]> = {}
+
     for (const [meetingId, participants] of this.activeParticipants.entries()) {
       if (participants.size > 0) {
         liveState[meetingId] = Array.from(participants.values()).map(
@@ -356,6 +390,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         )
       }
     }
+
     client.emit('meetings_live_state', liveState)
   }
 
@@ -364,15 +399,59 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     client.leave('meetings_list')
   }
 
+  @SubscribeMessage('transfer_host')
+  handleTransferHost(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: TransferHostPayload,
+  ) {
+    const currentRuntimeHost = this.runtimeHosts.get(payload.meetingId)
+
+    // Only the current runtime host can transfer
+    if (currentRuntimeHost !== payload.fromUserId) {
+      client.emit('error', { message: 'Only the current host can transfer host rights' })
+
+      return
+    }
+
+    const roomParticipants = this.activeParticipants.get(payload.meetingId)
+    const targetIsPresent = roomParticipants
+      ? Array.from(roomParticipants.values()).some(
+          (participant) => participant.userId === payload.toUserId,
+        )
+      : false
+
+    if (!targetIsPresent) {
+      client.emit('error', { message: 'Target user is not in the meeting' })
+
+      return
+    }
+
+    this.runtimeHosts.set(payload.meetingId, payload.toUserId)
+
+    this.server.to(`meeting_${payload.meetingId}`).emit('host_changed', {
+      meetingId: payload.meetingId,
+      hostUserId: payload.toUserId,
+    })
+
+    this.logger.log(
+      `Host transferred in meeting ${payload.meetingId}: ${payload.fromUserId} → ${payload.toUserId}`,
+    )
+  }
+
   @SubscribeMessage('end_meeting')
   async handleEndMeeting(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { meetingId: number; userId: number },
   ) {
-    const meeting = await this.meetingsService.findById(payload.meetingId).catch(() => null)
+    const hostId = await this.meetingsService.findHostIdById(payload.meetingId).catch(() => null)
 
-    if (!meeting || meeting.host_id !== payload.userId) {
+    const runtimeHostId = this.runtimeHosts.get(payload.meetingId)
+    const isRuntimeHost = runtimeHostId === payload.userId
+    const isOwner = hostId === payload.userId
+
+    if (hostId === null || (!isRuntimeHost && !isOwner)) {
       client.emit('error', { message: 'Only the host can end the meeting' })
+
       return
     }
 
@@ -396,6 +475,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     this.speakerStates.get(payload.meetingId)?.clear()
     this.activeVotes.delete(payload.meetingId)
+    this.runtimeHosts.delete(payload.meetingId)
 
     // Reset status to scheduled
     this.meetingsService
@@ -423,6 +503,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!this.speakerStates.has(payload.meetingId)) {
       this.speakerStates.set(payload.meetingId, new Map())
     }
+
     this.speakerStates.get(payload.meetingId)!.set(payload.userId, payload.enabled)
 
     // Broadcast to all other participants in the meeting room (excluding sender)
@@ -515,6 +596,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (queue.length < 2) queue.push(audioBuffer)
       else queue[queue.length - 1] = audioBuffer // replace oldest buffered with newest
       this.audioQueue.set(client.id, queue)
+
       return
     }
 

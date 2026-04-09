@@ -30,6 +30,9 @@ import { MessageReaction } from '@/modules/message_reactions/entities/message-re
 import { PinnedMessage } from '@/modules/pinned-messages/entities/pinned_message.entity'
 import { Meeting } from '@/modules/meetings/entities/meeting.entity'
 import { MeetingParticipant } from '@/modules/meetings/entities/meeting_participant.entity'
+import { MeetingHostSchedule } from '@/modules/meetings/entities/meeting_host_schedule.entity'
+import { MeetingPin } from '@/modules/meetings/entities/meeting_pin.entity'
+import { MeetingCompany } from '@/modules/meetings/entities/meeting_company.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -66,6 +69,9 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         PinnedMessage,
         Meeting,
         MeetingParticipant,
+        MeetingHostSchedule,
+        MeetingPin,
+        MeetingCompany,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

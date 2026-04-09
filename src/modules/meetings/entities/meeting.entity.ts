@@ -13,6 +13,8 @@ import { Exclude } from 'class-transformer'
 import { v4 as uuidv4 } from 'uuid'
 import { User } from '@/modules/users/entities/user.entity'
 import { MeetingParticipant } from './meeting_participant.entity'
+import { MeetingPin } from './meeting_pin.entity'
+import { MeetingCompany } from './meeting_company.entity'
 
 export enum MeetingStatus {
   SCHEDULED = 'scheduled',
@@ -92,6 +94,12 @@ export class Meeting {
 
   @OneToMany(() => MeetingParticipant, (participant) => participant.meeting)
   participants?: MeetingParticipant[]
+
+  @OneToMany(() => MeetingPin, (pin) => pin.meeting)
+  pins?: MeetingPin[]
+
+  @OneToMany(() => MeetingCompany, (meetingCompany) => meetingCompany.meeting)
+  meeting_companies?: MeetingCompany[]
 
   @CreateDateColumn({ name: 'created_at' })
   created_at: Date

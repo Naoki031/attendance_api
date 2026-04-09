@@ -13,3 +13,6 @@ order: 80
 - To use **Face Check-In**, go to your **Profile** page first and complete the Face KYC registration. After an admin approves it, the "Face Check-In" button on the Home page will let you clock in/out using your camera
 - During Face KYC or face check-in, follow the on-screen instruction (blink / smile / turn head) — the system will read it out loud and the oval guide turns **green** when your face is detected correctly
 - To review your own attendance records, go to your **Profile** page and scroll down to the **Attendance History** table — use the month and year selectors to browse past months
+- In **Meetings**, pin your frequently used rooms so they always appear at the top of the list
+- In a meeting, use **Story Point voting** (Fibonacci cards) for sprint estimation — the system calculates the average automatically
+- When sharing your screen in a meeting, other participants can see your cursor and place **click markers** to point things out

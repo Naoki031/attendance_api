@@ -29,6 +29,9 @@ import { MessageReaction } from '../../modules/message_reactions/entities/messag
 import { PinnedMessage } from '../../modules/pinned-messages/entities/pinned_message.entity'
 import { Meeting } from '../../modules/meetings/entities/meeting.entity'
 import { MeetingParticipant } from '../../modules/meetings/entities/meeting_participant.entity'
+import { MeetingHostSchedule } from '../../modules/meetings/entities/meeting_host_schedule.entity'
+import { MeetingPin } from '../../modules/meetings/entities/meeting_pin.entity'
+import { MeetingCompany } from '../../modules/meetings/entities/meeting_company.entity'
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
@@ -63,6 +66,9 @@ const options: DataSourceOptions & SeederOptions = {
     PinnedMessage,
     Meeting,
     MeetingParticipant,
+    MeetingHostSchedule,
+    MeetingPin,
+    MeetingCompany,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',

@@ -20,3 +20,5 @@ order: 80
 - In **Attendance Logs**, click the **camera icon** on any face check-in entry to view the captured photo and confidence score — useful for verifying disputed attendance records
 - To reset an employee's face registration (so they can re-submit), click the **Cancel KYC** button on their row in **Management → Users**
 - Chat emoji reactions are **exclusive per user per message** — each user can only have one reaction; picking a new emoji automatically replaces the previous one
+- In **Meetings**, use the **host schedule** feature to rotate hosts automatically — useful for daily standups where different team members take turns leading
+- Admins can **edit and delete** any user's meeting (not just their own) — useful when a meeting creator leaves the company

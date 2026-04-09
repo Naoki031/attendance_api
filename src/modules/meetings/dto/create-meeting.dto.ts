@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsArray,
   Min,
   Max,
 } from 'class-validator'
@@ -53,4 +54,13 @@ export class CreateMeetingDto {
   @Min(1)
   @Max(4)
   schedule_interval_weeks?: number
+
+  /**
+   * Company IDs this meeting is scoped to. Defaults to the creator's company if not provided.
+   * Only users belonging to one of these companies can see this meeting.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  company_ids?: number[]
 }
