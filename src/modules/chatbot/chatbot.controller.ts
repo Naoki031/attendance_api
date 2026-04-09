@@ -2,7 +2,9 @@ import { Controller, Post, Body, ValidationPipe, ForbiddenException } from '@nes
 import { ChatbotService } from './chatbot.service'
 import { ChatRequestDto } from './dto/chat-message.dto'
 import { User } from '@/modules/auth/decorators/user.decorator'
+import type { User as UserEntity } from '@/modules/users/entities/user.entity'
 import { PromptBuilderService } from './prompt-builder/prompt-builder.service'
+import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Controller('chatbot')
 export class ChatbotController {
@@ -18,11 +20,9 @@ export class ChatbotController {
   @Post('message')
   async message(
     @Body(ValidationPipe) dto: ChatRequestDto,
-    @User() requestingUser: { id: number; email: string; roles: string[] },
+    @User() requestingUser: UserEntity,
   ): Promise<{ reply: string; suggestions: string[] }> {
-    const isAdmin = requestingUser.roles?.some((role) =>
-      ['admin', 'super', 'super_admin', 'super admin'].includes(role.toLowerCase()),
-    )
+    const isAdmin = isPrivilegedUser(requestingUser.roles)
 
     return this.chatbotService.chat(dto.messages, dto.tone, dto.language, isAdmin)
   }
@@ -32,14 +32,8 @@ export class ChatbotController {
    * Admin-only endpoint for development convenience.
    */
   @Post('reload-prompts')
-  async reloadPrompts(
-    @User() requestingUser: { id: number; email: string; roles: string[] },
-  ): Promise<{ sections: number }> {
-    const isAdmin = requestingUser.roles?.some((role) =>
-      ['admin', 'super', 'super_admin', 'super admin'].includes(role.toLowerCase()),
-    )
-
-    if (!isAdmin) {
+  async reloadPrompts(@User() requestingUser: UserEntity): Promise<{ sections: number }> {
+    if (!isPrivilegedUser(requestingUser.roles)) {
       throw new ForbiddenException('Admin access required')
     }
 

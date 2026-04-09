@@ -17,24 +17,13 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express'
 import { memoryStorage } from 'multer'
 import { Request } from 'express'
-import { IsString, IsNumber } from 'class-validator'
 import { AttendanceLogsService } from './attendance_logs.service'
 import { AdminEditAttendanceLogDto } from './dto/admin-edit-attendance-log.dto'
+import { ClockQrDto } from './dto/clock-qr.dto'
 import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
 import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import { User as UserEntity } from '@/modules/users/entities/user.entity'
-
-class ClockQrDto {
-  @IsString()
-  token!: string
-
-  @IsNumber()
-  companyId!: number
-
-  @IsString()
-  date!: string
-}
 
 @Controller('attendance-logs')
 @UseGuards(PermissionsGuard)
@@ -186,6 +175,14 @@ export class AttendanceLogsController {
       descriptor = JSON.parse(descriptorJson)
     } catch {
       throw new BadRequestException('descriptor must be a valid JSON array')
+    }
+
+    if (
+      !Array.isArray(descriptor) ||
+      descriptor.length !== 128 ||
+      !descriptor.every((value) => typeof value === 'number')
+    ) {
+      throw new BadRequestException('descriptor must be a 128-element numeric array')
     }
 
     const xRealIp = request.headers['x-real-ip'] as string | undefined

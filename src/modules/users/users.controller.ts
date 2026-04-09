@@ -28,6 +28,7 @@ import { User } from '@/modules/auth/decorators/user.decorator'
 import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
 import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
 import type { User as UserEntity } from '@/modules/users/entities/user.entity'
+import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -35,7 +36,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  create(@Body() createUserDto: CreateUserDto) {
+  create(@Body(ValidationPipe) createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto)
   }
 
@@ -93,7 +94,7 @@ export class UsersController {
   }
 
   @Put(':id')
-  update(@Param('id') userId: string, @Body() updateUserDto: UpdateUserDto) {
+  update(@Param('id') userId: string, @Body(ValidationPipe) updateUserDto: UpdateUserDto) {
     return this.usersService.update(+userId, updateUserDto)
   }
 
@@ -127,10 +128,7 @@ export class UsersController {
     @UploadedFile() imageFile: Express.Multer.File,
     @Body('descriptor') descriptorJson: string,
   ) {
-    const isAdmin =
-      currentUser.roles?.includes('admin') || currentUser.roles?.includes('super_admin')
-
-    if (currentUser.id !== userId && !isAdmin) {
+    if (currentUser.id !== userId && !isPrivilegedUser(currentUser.roles)) {
       throw new ForbiddenException('You can only register your own face')
     }
 
@@ -142,6 +140,14 @@ export class UsersController {
       descriptor = JSON.parse(descriptorJson)
     } catch {
       throw new BadRequestException('descriptor must be a valid JSON array')
+    }
+
+    if (
+      !Array.isArray(descriptor) ||
+      descriptor.length !== 128 ||
+      !descriptor.every((value) => typeof value === 'number')
+    ) {
+      throw new BadRequestException('descriptor must be a 128-element numeric array')
     }
 
     return this.usersService.registerFace(userId, descriptor, imageFile)

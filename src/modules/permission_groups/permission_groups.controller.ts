@@ -23,6 +23,7 @@ export class PermissionGroupsController {
   constructor(private readonly permissionGroupsService: PermissionGroupsService) {}
 
   @Post()
+  @Permissions('all_privileges', 'create')
   create(@Body(ValidationPipe) createPermissionGroupDto: CreatePermissionGroupDto) {
     return this.permissionGroupsService.create(createPermissionGroupDto)
   }
@@ -44,7 +45,7 @@ export class PermissionGroupsController {
   }
 
   @Put(':id')
-  @Permissions('update')
+  @Permissions('all_privileges', 'update')
   update(
     @Param('id', ParseIntPipe) permissionGroupId: number,
     @Body(ValidationPipe) updatePermissionGroupDto: UpdatePermissionGroupDto,
@@ -53,7 +54,7 @@ export class PermissionGroupsController {
   }
 
   @Delete(':id')
-  @Permissions('delete')
+  @Permissions('all_privileges', 'delete')
   remove(@Param('id', ParseIntPipe) permissionGroupId: number) {
     return this.permissionGroupsService.remove(permissionGroupId)
   }

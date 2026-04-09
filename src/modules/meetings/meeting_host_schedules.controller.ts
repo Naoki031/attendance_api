@@ -10,13 +10,14 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common'
 import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 import { CreateHostScheduleDto } from './dto/create-host-schedule.dto'
 import { UpdateHostScheduleDto } from './dto/update-host-schedule.dto'
 import { User as UserDecorator } from '@/modules/auth/decorators/user.decorator'
 import type { User } from '@/modules/users/entities/user.entity'
-import { isPrivilegedUser } from './utils/is-privileged.utility'
+import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Controller('meetings/:uuid/host-schedules')
 export class MeetingHostSchedulesController {
@@ -39,7 +40,7 @@ export class MeetingHostSchedulesController {
   create(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
-    @Body() dto: CreateHostScheduleDto,
+    @Body(ValidationPipe) dto: CreateHostScheduleDto,
   ) {
     return this.hostSchedulesService.create(uuid, user.id, dto, isPrivilegedUser(user.roles))
   }
@@ -49,7 +50,7 @@ export class MeetingHostSchedulesController {
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
     @UserDecorator() user: User,
-    @Body() dto: UpdateHostScheduleDto,
+    @Body(ValidationPipe) dto: UpdateHostScheduleDto,
   ) {
     return this.hostSchedulesService.update(id, uuid, user.id, dto, isPrivilegedUser(user.roles))
   }

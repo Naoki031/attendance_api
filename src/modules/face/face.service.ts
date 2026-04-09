@@ -5,6 +5,10 @@ import { User } from '@/modules/users/entities/user.entity'
 
 const FACE_MATCH_THRESHOLD = 0.55
 
+// If the best and second-best match are within this margin, the result is
+// ambiguous and must be rejected to prevent clocking in the wrong employee.
+const AMBIGUITY_MARGIN = 0.08
+
 export interface MatchResult {
   employeeId: number
   employeeName: string
@@ -42,6 +46,7 @@ export class FaceService {
 
     let bestMatch: MatchResult | null = null
     let bestDistance = FACE_MATCH_THRESHOLD
+    let secondBestDistance = FACE_MATCH_THRESHOLD
 
     for (const user of candidates) {
       if (!user.face_descriptor || user.face_descriptor.length !== 128) continue
@@ -52,6 +57,7 @@ export class FaceService {
       )
 
       if (distance < bestDistance) {
+        secondBestDistance = bestDistance
         bestDistance = distance
         bestMatch = {
           employeeId: user.id,
@@ -60,7 +66,16 @@ export class FaceService {
           distance,
           confidence: parseFloat((1 - distance).toFixed(4)),
         }
+      } else if (distance < secondBestDistance) {
+        secondBestDistance = distance
       }
+    }
+
+    // Reject ambiguous matches: if the top 2 candidates are too close,
+    // we cannot confidently identify the person — returning null prevents
+    // clocking in the wrong employee.
+    if (bestMatch && secondBestDistance - bestMatch.distance < AMBIGUITY_MARGIN) {
+      return null
     }
 
     return bestMatch

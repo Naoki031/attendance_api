@@ -23,6 +23,7 @@ import { GoogleSheetsService } from '@/modules/google_sheets/google_sheets.servi
 import { GoogleCalendarService } from '@/modules/google_calendar/google_calendar.service'
 import { EventsGateway } from '@/modules/events/events.gateway'
 import { AttendanceLogsService } from '@/modules/attendance_logs/attendance_logs.service'
+import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Injectable()
 export class EmployeeRequestsService {
@@ -316,12 +317,10 @@ export class EmployeeRequestsService {
     try {
       const request = await this.findOne(id)
 
-      const isAdmin =
-        requestingUser.roles?.includes('admin') || requestingUser.roles?.includes('super_admin')
       const isOwnerAndPending =
         request.user_id === requestingUser.id && request.status === EmployeeRequestStatus.PENDING
 
-      if (!isAdmin && !isOwnerAndPending) {
+      if (!isPrivilegedUser(requestingUser.roles) && !isOwnerAndPending) {
         throw new ForbiddenException('You are not allowed to edit this request')
       }
 
@@ -457,7 +456,9 @@ export class EmployeeRequestsService {
       .createQueryBuilder('user')
       .innerJoin('user.user_group_permissions', 'ugp')
       .innerJoin('ugp.permission_group', 'pg')
-      .where('pg.name IN (:...names)', { names: ['admin', 'super_admin'] })
+      .where('pg.name IN (:...names)', {
+        names: ['admin', 'super_admin', 'super admin', 'superadmin', 'super'],
+      })
       .andWhere('user.is_activated = :activated', { activated: true })
       .getMany()
   }

@@ -29,6 +29,7 @@ import type { ColumnConfigItem } from '@/modules/google_sheets/entities/company_
 import { FaceService } from '@/modules/face/face.service'
 import { StorageService } from '@/modules/storage/storage.service'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
+import { isSuperAdmin } from '@/common/utils/is-privileged.utility'
 
 export interface FaceCheckinResult {
   success: boolean
@@ -868,16 +869,15 @@ export class AttendanceLogsService {
       throw new BadRequestException('Face not recognized. Please register your face or try again.')
     }
 
-    // Non-admin employees can only clock in/out themselves — prevents clocking out a colleague early
-    const isAdmin = (requestingUserRoles ?? []).some((role) => {
-      const normalized = role.toLowerCase().replace(/[\s_]+/g, '')
-
-      return normalized === 'admin' || normalized === 'superadmin'
-    })
-
-    if (!isAdmin && requestingUserId !== undefined && matchResult.employeeId !== requestingUserId) {
+    // Only super-admin users can clock in/out other people (kiosk mode).
+    // Regular employees and non-super admins must clock themselves only.
+    if (
+      !isSuperAdmin(requestingUserRoles) &&
+      requestingUserId !== undefined &&
+      matchResult.employeeId !== requestingUserId
+    ) {
       throw new ForbiddenException(
-        'You can only clock in/out yourself. Ask an admin to set up a dedicated shared device.',
+        'You can only clock in/out yourself. Ask a super admin to set up a dedicated shared device.',
       )
     }
 

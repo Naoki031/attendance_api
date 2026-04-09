@@ -82,7 +82,7 @@ export class PermissionsService {
    * @returns {Promise<Permission>} A promise that resolves to the updated permission.
    */
   update(permissionId: number, updatePermissionDto: UpdatePermissionDto): Promise<Permission> {
-    updatePermissionDto.name = updatePermissionDto.name.toUpperCase()
+    if (updatePermissionDto.name) updatePermissionDto.name = updatePermissionDto.name.toUpperCase()
 
     // Update the permission with the given ID
     const permission = this.permissionRepository.save({

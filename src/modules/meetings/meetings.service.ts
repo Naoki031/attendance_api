@@ -13,7 +13,7 @@ import { MeetingCompany } from './entities/meeting_company.entity'
 import { CreateMeetingDto } from './dto/create-meeting.dto'
 import { UpdateMeetingDto } from './dto/update-meeting.dto'
 import { FilterMeetingDto } from './dto/filter-meeting.dto'
-import { isPrivilegedUser } from './utils/is-privileged.utility'
+import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Injectable()
 export class MeetingsService {

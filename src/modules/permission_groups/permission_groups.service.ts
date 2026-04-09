@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { CreatePermissionGroupDto } from './dto/create-permission_group.dto'
 import { UpdatePermissionGroupDto } from './dto/update-permission_group.dto'
 import { InjectRepository } from '@nestjs/typeorm'
@@ -95,13 +95,19 @@ export class PermissionGroupsService {
     })
 
     if (!permissionGroup) {
-      throw new Error('PermissionGroup not found')
+      throw new NotFoundException('PermissionGroup not found')
     }
 
-    // Update the permission group with the new values
-    permissionGroup.name = updatePermissionGroupDto.name
-    permissionGroup.permissions = updatePermissionGroupDto.permissions
-    permissionGroup.descriptions = updatePermissionGroupDto.descriptions
+    // Update only the fields provided in the DTO
+    if (updatePermissionGroupDto.name !== undefined) {
+      permissionGroup.name = updatePermissionGroupDto.name
+    }
+    if (updatePermissionGroupDto.permissions !== undefined) {
+      permissionGroup.permissions = updatePermissionGroupDto.permissions
+    }
+    if (updatePermissionGroupDto.descriptions !== undefined) {
+      permissionGroup.descriptions = updatePermissionGroupDto.descriptions
+    }
 
     // Save the updated permission group to the repository
     return await this.permissionGroupRepository.save(permissionGroup)

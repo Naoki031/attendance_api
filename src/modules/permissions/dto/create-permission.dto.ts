@@ -7,7 +7,7 @@ export class CreatePermissionDto {
 
   @IsString()
   @IsNotEmpty()
-  key?: string
+  key: string
 
   @IsString()
   @IsOptional()

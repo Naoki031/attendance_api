@@ -23,13 +23,13 @@ export class PermissionsController {
   constructor(private readonly permissionsService: PermissionsService) {}
 
   @Post()
-  @Permissions('create')
+  @Permissions('all_privileges', 'create')
   create(@Body(ValidationPipe) createPermissionDto: CreatePermissionDto) {
     return this.permissionsService.create(createPermissionDto)
   }
 
   @Get()
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   findAll(@Query('search') search?: string) {
     if (search) {
       return this.permissionsService.findWithFilters({ search })
@@ -39,22 +39,22 @@ export class PermissionsController {
   }
 
   @Get(':id')
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   findOne(@Param('id', ParseIntPipe) permissionId: number) {
     return this.permissionsService.findOne(permissionId)
   }
 
   @Put(':id')
-  @Permissions('update')
+  @Permissions('all_privileges', 'update')
   update(
     @Param('id', ParseIntPipe) permissionId: number,
-    @Body() updatePermissionDto: UpdatePermissionDto,
+    @Body(ValidationPipe) updatePermissionDto: UpdatePermissionDto,
   ) {
     return this.permissionsService.update(permissionId, updatePermissionDto)
   }
 
   @Delete(':id')
-  @Permissions('delete')
+  @Permissions('all_privileges', 'delete')
   remove(@Param('id', ParseIntPipe) permissionId: number) {
     return this.permissionsService.remove(permissionId)
   }

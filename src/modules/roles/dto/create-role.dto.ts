@@ -7,7 +7,7 @@ export class CreateRoleDto {
 
   @IsString()
   @IsNotEmpty()
-  key?: string
+  key: string
 
   @IsString()
   @IsOptional()

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common'
+import { Controller, Get, Post, Body, Patch, Param, Delete, ValidationPipe } from '@nestjs/common'
 import { UserGroupPermissionsService } from './user_group_permissions.service'
 import { CreateUserGroupPermissionDto } from './dto/create-user_group_permission.dto'
 import { UpdateUserGroupPermissionDto } from './dto/update-user_group_permission.dto'
@@ -8,7 +8,7 @@ export class UserGroupPermissionsController {
   constructor(private readonly userGroupPermissionsService: UserGroupPermissionsService) {}
 
   @Post()
-  create(@Body() createUserGroupPermissionDto: CreateUserGroupPermissionDto) {
+  create(@Body(ValidationPipe) createUserGroupPermissionDto: CreateUserGroupPermissionDto) {
     return this.userGroupPermissionsService.create(createUserGroupPermissionDto)
   }
 
@@ -25,7 +25,7 @@ export class UserGroupPermissionsController {
   @Patch(':id')
   update(
     @Param('id') userGroupPermissionId: string,
-    @Body() updateUserGroupPermissionDto: UpdateUserGroupPermissionDto,
+    @Body(ValidationPipe) updateUserGroupPermissionDto: UpdateUserGroupPermissionDto,
   ) {
     return this.userGroupPermissionsService.update(
       +userGroupPermissionId,

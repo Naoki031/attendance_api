@@ -23,13 +23,13 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Post()
-  @Permissions('create')
+  @Permissions('all_privileges', 'create')
   create(@Body(ValidationPipe) createRoleDto: CreateRoleDto) {
     return this.rolesService.create(createRoleDto)
   }
 
   @Get()
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   findAll(@Query('search') search?: string) {
     if (search) {
       return this.rolesService.findWithFilters({ search })
@@ -39,13 +39,13 @@ export class RolesController {
   }
 
   @Get(':id')
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   findOne(@Param('id', ParseIntPipe) roleId: string) {
     return this.rolesService.findOne(+roleId)
   }
 
   @Put(':id')
-  @Permissions('update')
+  @Permissions('all_privileges', 'update')
   update(
     @Param('id', ParseIntPipe) roleId: number,
     @Body(ValidationPipe) updateRoleDto: UpdateRoleDto,
@@ -54,7 +54,7 @@ export class RolesController {
   }
 
   @Delete(':id')
-  @Permissions('delete')
+  @Permissions('all_privileges', 'delete')
   remove(@Param('id', ParseIntPipe) roleId: number) {
     return this.rolesService.remove(+roleId)
   }

@@ -11,15 +11,18 @@ import {
   HttpStatus,
   UseInterceptors,
   ClassSerializerInterceptor,
+  ValidationPipe,
 } from '@nestjs/common'
 import { MeetingsService } from './meetings.service'
 import { SpeechService } from './speech.service'
 import { CreateMeetingDto } from './dto/create-meeting.dto'
 import { UpdateMeetingDto } from './dto/update-meeting.dto'
 import { FilterMeetingDto } from './dto/filter-meeting.dto'
+import { GetTokenDto } from './dto/get-token.dto'
+import { ProcessSpeechDto } from './dto/process-speech.dto'
 import { User as UserDecorator } from '@/modules/auth/decorators/user.decorator'
 import type { User } from '@/modules/users/entities/user.entity'
-import { isPrivilegedUser } from './utils/is-privileged.utility'
+import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Controller('meetings')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -30,7 +33,7 @@ export class MeetingsController {
   ) {}
 
   @Post()
-  create(@UserDecorator() user: User, @Body() dto: CreateMeetingDto) {
+  create(@UserDecorator() user: User, @Body(ValidationPipe) dto: CreateMeetingDto) {
     return this.meetingsService.create(user.id, dto)
   }
 
@@ -57,7 +60,11 @@ export class MeetingsController {
   }
 
   @Patch(':uuid')
-  update(@Param('uuid') uuid: string, @UserDecorator() user: User, @Body() dto: UpdateMeetingDto) {
+  update(
+    @Param('uuid') uuid: string,
+    @UserDecorator() user: User,
+    @Body(ValidationPipe) dto: UpdateMeetingDto,
+  ) {
     return this.meetingsService.update(uuid, user.id, dto, isPrivilegedUser(user.roles))
   }
 
@@ -71,13 +78,13 @@ export class MeetingsController {
   async getToken(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
-    @Body() body: { password?: string },
+    @Body(ValidationPipe) dto: GetTokenDto,
   ) {
     const token = await this.meetingsService.generateToken(
       uuid,
       user.id,
       user.full_name,
-      body.password,
+      dto.password,
     )
 
     return { token }
@@ -92,11 +99,11 @@ export class MeetingsController {
   async processSpeech(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
-    @Body() body: { audioBase64: string; targetLanguages?: string[] },
+    @Body(ValidationPipe) dto: ProcessSpeechDto,
   ) {
     const meeting = await this.meetingsService.findByUuid(uuid)
-    const audioBuffer = Buffer.from(body.audioBase64, 'base64')
-    const targetLanguages = body.targetLanguages ?? ['vi', 'en', 'ja']
+    const audioBuffer = Buffer.from(dto.audioBase64, 'base64')
+    const targetLanguages = dto.targetLanguages ?? ['vi', 'en', 'ja']
 
     return this.speechService.process(audioBuffer, meeting.id, user.id, targetLanguages)
   }

@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm'
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm'
 
 @Entity({ name: 'permissions' })
 export class Permission {
@@ -28,7 +28,7 @@ export class Permission {
   })
   created_at?: Date
 
-  @CreateDateColumn({
+  @UpdateDateColumn({
     nullable: true,
     name: 'updated_at',
   })

@@ -1,6 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { UserGroupPermissionsService } from '@/modules/user_group_permissions/user_group_permissions.service'
+import { PERMISSIONS_KEY } from '@/modules/permissions/decorators/permissions.decorator'
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -10,7 +11,7 @@ export class PermissionsGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredPermissions = this.reflector.getAllAndOverride<string[]>('permissions', [
+    const requiredPermissions = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [
       context.getHandler(),
       context.getClass(),
     ])
