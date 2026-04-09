@@ -28,6 +28,15 @@ const TONE_INSTRUCTIONS: Record<string, string> = {
 - Use bullet points and short sentences
 - Skip pleasantries unless the user initiates them
 - Prioritize clarity and speed over elaboration`,
+
+  rapper: `
+
+## Communication Style
+- Respond in rap style — use rhymes, rhythm, and flow in every answer
+- Keep it fun and energetic but still accurate and helpful
+- Weave casual slang naturally into rhyming couplets or bars
+- Each answer should feel like a verse, not a lecture
+- Maintain the rap vibe even when explaining technical steps`,
 }
 
 @Injectable()

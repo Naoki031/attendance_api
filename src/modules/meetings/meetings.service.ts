@@ -81,21 +81,12 @@ export class MeetingsService {
     return { plain_password: plainPassword }
   }
 
-  async findAll(userId: number, filter: FilterMeetingDto): Promise<Meeting[]> {
+  async findAll(filter: FilterMeetingDto): Promise<Meeting[]> {
     const query = this.meetingRepository
       .createQueryBuilder('meeting')
       .leftJoinAndSelect('meeting.host', 'host')
       .leftJoinAndSelect('meeting.participants', 'participants')
       .leftJoinAndSelect('participants.user', 'participantUser')
-
-    // Only show: non-private meetings, or meetings where user is host/participant
-    query.andWhere(
-      `(meeting.is_private = false OR meeting.host_id = :userId OR EXISTS (
-        SELECT 1 FROM meeting_participants mp
-        WHERE mp.meeting_id = meeting.id AND mp.user_id = :userId
-      ))`,
-      { userId },
-    )
 
     if (filter.status) {
       query.andWhere('meeting.status = :status', { status: filter.status })

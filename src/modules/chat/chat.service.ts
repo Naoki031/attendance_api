@@ -112,6 +112,7 @@ export class ChatService {
     detectedLang: string
     roomId: number
     onChunk?: (lang: string, chunk: string) => void
+    forceRefresh?: boolean
   }): Promise<Record<string, string>> {
     const targetLangs = SUPPORTED_LANGUAGES.filter(
       (language) => language !== parameters.detectedLang,
@@ -139,6 +140,7 @@ export class ChatService {
       targetLangs,
       glossary,
       parameters.onChunk,
+      parameters.forceRefresh ?? false,
     )
 
     if (quotePrefix) {

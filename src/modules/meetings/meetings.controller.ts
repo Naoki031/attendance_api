@@ -34,8 +34,8 @@ export class MeetingsController {
   }
 
   @Get()
-  findAll(@UserDecorator() user: User, @Query() filter: FilterMeetingDto) {
-    return this.meetingsService.findAll(user.id, filter)
+  findAll(@Query() filter: FilterMeetingDto) {
+    return this.meetingsService.findAll(filter)
   }
 
   @Get(':uuid')

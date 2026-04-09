@@ -128,6 +128,8 @@ export class TranslateService {
       `- Example: {"en": "Hello", "ja": "こんにちは"}`,
       `- Return ONLY the JSON, no explanation, no markdown, no code fences.`,
       `- Translate faithfully. Do NOT add, remove, or rephrase content.`,
+      `- Keep ALL markdown formatting intact: @mentions, [link text](url), > blockquotes, **bold**, *italic*, \`code\`.`,
+      `- Do NOT translate proper nouns, usernames, @mentions, URLs, ticket IDs (e.g. TB-123), or code snippets.`,
     ].join('\n')
 
     const result = await this.tryTranslateWithModel(
@@ -231,7 +233,9 @@ export class TranslateService {
       `You are a professional translator. Translate the text inside <text> tags from ${sourceLang} to ${targetLang}.`,
       `- NEVER translate these IT terms, keep them as-is: ${IT_TERMS_PRESERVED}`,
       glossarySection,
-      `- Return ONLY the translated text, no explanation, no markdown, no quotes.`,
+      `- Return ONLY the translated text, no explanation, no markdown wrapper, no quotes.`,
+      `- Keep ALL markdown formatting intact: @mentions, [link text](url), > blockquotes, **bold**, *italic*, \`code\`.`,
+      `- Do NOT translate proper nouns, usernames, @mentions, URLs, ticket IDs (e.g. TB-123), or code snippets.`,
     ].join('\n')
 
     this.logger.log(
@@ -248,13 +252,16 @@ export class TranslateService {
     targetLangs: string[],
     glossaryTerms: string[] = [],
     onChunk?: (lang: string, chunk: string) => void,
+    forceRefresh = false,
   ): Promise<Record<string, string>> {
     if (targetLangs.length === 0) return {}
 
-    const cached = await this.findCache(messageId)
+    const cached = forceRefresh ? null : await this.findCache(messageId)
     const cachedTranslations = cached?.translations ?? {}
 
-    const missingLangs = targetLangs.filter((lang) => !cachedTranslations[lang])
+    const missingLangs = forceRefresh
+      ? targetLangs
+      : targetLangs.filter((lang) => !cachedTranslations[lang])
 
     if (missingLangs.length === 0) {
       return this.pickTranslations(cachedTranslations, targetLangs)
@@ -271,16 +278,11 @@ export class TranslateService {
     const merged = { ...cachedTranslations, ...newTranslations }
 
     try {
-      if (cached) {
-        cached.translations = merged
-        await this.translationCacheRepository.save(cached)
-      } else {
-        const entry = this.translationCacheRepository.create({
-          messageId,
-          translations: merged,
-        })
-        await this.translationCacheRepository.save(entry)
-      }
+      // Use upsert to avoid unique constraint race conditions on concurrent edits
+      await this.translationCacheRepository.upsert(
+        { messageId, translations: merged },
+        ['messageId'],
+      )
     } catch (error) {
       this.logger.error('Failed to save translation cache', error)
     }

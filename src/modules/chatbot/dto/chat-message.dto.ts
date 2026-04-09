@@ -20,7 +20,7 @@ export class ChatRequestDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['professional', 'friendly', 'concise'])
+  @IsIn(['professional', 'friendly', 'concise', 'rapper'])
   tone?: string
 
   @IsOptional()

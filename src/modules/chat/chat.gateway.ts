@@ -54,6 +54,11 @@ interface UpdateLanguagePayload {
   language: string
 }
 
+interface TypingPayload {
+  roomUuid: string
+  isTyping: boolean
+}
+
 interface SendThreadReplyPayload {
   roomUuid: string
   parentMessageId: number
@@ -221,6 +226,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     })
   }
 
+  @SubscribeMessage('typing')
+  async handleTyping(
+    @MessageBody() payload: TypingPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+    if (!room) return
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) return
+
+    // Broadcast to everyone else in the room (not the sender)
+    client.to(`room_${roomId}`).emit('typing', {
+      username: user.username,
+      isTyping: payload.isTyping,
+    })
+  }
+
   @SubscribeMessage('send_message')
   async handleSendMessage(
     @MessageBody() payload: SendMessagePayload,
@@ -348,13 +374,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(`room_${roomId}`).emit('message_edited', result)
 
-      // Translate in background — no await
+      // Translate in background — forceRefresh:true ensures stale cache is never used after edit
       this.chatService
         .translateMessage({
           messageId: result.id,
           content: result.content,
           detectedLang: result.detectedLang,
           roomId,
+          forceRefresh: true,
           onChunk: (lang, chunk) => {
             this.server
               .to(`room_${roomId}`)
