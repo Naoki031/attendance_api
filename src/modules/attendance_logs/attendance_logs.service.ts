@@ -618,33 +618,41 @@ export class AttendanceLogsService {
 
   /**
    * Maps a field name from column_config to the corresponding value on an AttendanceLog.
+   * When log is null (no attendance record for that day), user info and date are taken
+   * from the fallback parameters; attendance-specific fields are returned as empty strings.
    */
-  private getAttendanceLogFieldValue(log: AttendanceLog, field: string): string | number {
+  private getAttendanceLogFieldValue(
+    log: AttendanceLog | null,
+    field: string,
+    fallbackUser?: User,
+    fallbackDate?: string,
+  ): string | number {
+    const user = log?.user ?? fallbackUser
     switch (field) {
       case 'id':
-        return log.user?.id ?? log.user_id
+        return user?.id ?? ''
       case 'user.device_user_id':
-        return log.user?.device_user_id ?? ''
+        return user?.device_user_id ?? ''
       case 'user.full_name':
-        return log.user?.full_name ?? ''
+        return user?.full_name ?? ''
       case 'user.email':
-        return log.user?.email ?? ''
+        return user?.email ?? ''
       case 'user.position':
-        return log.user?.position ?? ''
+        return user?.position ?? ''
       case 'date':
-        return log.date
+        return log?.date ?? fallbackDate ?? ''
       case 'scheduled_start':
-        return log.scheduled_start ?? ''
+        return log?.scheduled_start ?? ''
       case 'scheduled_end':
-        return log.scheduled_end ?? ''
+        return log?.scheduled_end ?? ''
       case 'schedule_type':
-        return log.schedule_type ?? ''
+        return log?.schedule_type ?? ''
       case 'clock_in':
-        return log.clock_in ?? ''
+        return log?.clock_in ?? ''
       case 'clock_out':
-        return log.clock_out ?? ''
+        return log?.clock_out ?? ''
       case 'attendance_count':
-        return log.attendance_count
+        return log?.attendance_count ?? ''
       default:
         return ''
     }
@@ -660,15 +668,22 @@ export class AttendanceLogsService {
     month: string,
   ): Promise<{ rows: number; spreadsheetUrl: string }> {
     // month format: YYYY-MM
-    const from = `${month}-01`
-    const lastDay = new Date(
-      parseInt(month.substring(0, 4)),
-      parseInt(month.substring(5, 7)),
-      0,
-    ).getDate()
-    const to = `${month}-${String(lastDay).padStart(2, '0')}`
+    const startOfMonth = momentTimezone.utc(`${month}-01`, 'YYYY-MM-DD')
+    const endOfMonth = startOfMonth.clone().endOf('month')
+    const from = startOfMonth.format('YYYY-MM-DD')
+    const to = endOfMonth.format('YYYY-MM-DD')
 
-    const logsQueryBuilder = this.attendanceLogRepository
+    // Generate all working days (Mon–Fri) in the month
+    const workingDays: string[] = []
+    const cursor = startOfMonth.clone()
+    while (cursor.isSameOrBefore(endOfMonth, 'day')) {
+      const dow = cursor.day() // 0 = Sun, 6 = Sat
+      if (dow >= 1 && dow <= 5) workingDays.push(cursor.format('YYYY-MM-DD'))
+      cursor.add(1, 'day')
+    }
+
+    // Fetch all existing attendance logs for the month in this company
+    const logs = await this.attendanceLogRepository
       .createQueryBuilder('log')
       .leftJoinAndSelect('log.user', 'user')
       .where('log.date BETWEEN :from AND :to', { from, to })
@@ -676,20 +691,29 @@ export class AttendanceLogsService {
         'log.user_id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id = :companyId)',
         { companyId },
       )
-      .orderBy('log.date', 'ASC')
-      .addOrderBy('log.user_id', 'ASC')
+      .getMany()
 
-    const logs = await logsQueryBuilder.getMany()
+    // Fetch all employees in the company who require attendance tracking, sorted by name
+    const users = await this.userRepository
+      .createQueryBuilder('user')
+      .innerJoin('user_departments', 'ud', 'ud.user_id = user.id AND ud.company_id = :companyId', {
+        companyId,
+      })
+      .where('user.skip_attendance = :skip', { skip: false })
+      .orderBy('user.first_name', 'ASC')
+      .addOrderBy('user.last_name', 'ASC')
+      .getMany()
 
-    this.logger.log(`[EXPORT] company=${companyId} month=${month} → ${logs.length} logs found`)
+    this.logger.log(
+      `[EXPORT] company=${companyId} month=${month} → ${logs.length} logs, ${users.length} users, ${workingDays.length} working days`,
+    )
 
-    // Sort by employee name then date
-    logs.sort((logA, logB) => {
-      const nameA = logA.user?.full_name ?? ''
-      const nameB = logB.user?.full_name ?? ''
-      if (nameA !== nameB) return nameA.localeCompare(nameB)
-      return logA.date.localeCompare(logB.date)
-    })
+    // Build log lookup: userId → date → log
+    const logMap = new Map<number, Map<string, AttendanceLog>>()
+    for (const log of logs) {
+      if (!logMap.has(log.user_id)) logMap.set(log.user_id, new Map())
+      logMap.get(log.user_id)!.set(log.date, log)
+    }
 
     if (!this.googleSheetsService.isReady()) {
       throw new BadRequestException('Google Sheets integration is not configured')
@@ -707,7 +731,6 @@ export class AttendanceLogsService {
       )
     }
 
-    // Use column_config headers if defined, otherwise use default order
     const sortedColumns = config.columnConfig
       .slice()
       .sort((colA, colB) => colA.column.localeCompare(colB.column))
@@ -718,13 +741,16 @@ export class AttendanceLogsService {
 
     const headers = sortedColumns.map((col) => col.header)
 
-    // Build data rows using column_config field mapping
-    const rows = logs.map((log) =>
-      sortedColumns.map((col) => this.getAttendanceLogFieldValue(log, col.field)),
-    )
-
-    if (logs.length > 0) {
-      this.logger.log(`[EXPORT] sample row[0]: ${JSON.stringify(rows[0])}`)
+    // Build rows: one row per user per working day (empty attendance fields if no log)
+    const rows: (string | number)[][] = []
+    for (const user of users) {
+      const userLogMap = logMap.get(user.id) ?? new Map<string, AttendanceLog>()
+      for (const day of workingDays) {
+        const log = userLogMap.get(day) ?? null
+        rows.push(
+          sortedColumns.map((col) => this.getAttendanceLogFieldValue(log, col.field, user, day)),
+        )
+      }
     }
 
     try {
