@@ -75,6 +75,10 @@ export class MeetingHostSchedule {
   @Column({ name: 'recur_end_date', type: 'date', nullable: true })
   recur_end_date?: string
 
+  /** Dates explicitly excluded from this schedule (one-off overrides). */
+  @Column({ name: 'excluded_dates', type: 'json', nullable: true })
+  excluded_dates?: string[]
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   is_active!: boolean
 

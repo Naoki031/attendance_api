@@ -159,11 +159,15 @@ export class AuthService {
       this.logger.error('Failed to create avatar upload directory:', error)
     }
 
-    // Delete old avatar file if exists
+    // Delete old avatar file if exists — validate path stays within uploads/avatars to prevent traversal
     if (user.avatar) {
       try {
-        const oldPath = path.join(process.cwd(), user.avatar)
-        await fs.unlink(oldPath)
+        const uploadsDir = path.resolve(process.cwd(), 'uploads', 'avatars')
+        const oldPath = path.resolve(process.cwd(), user.avatar.replace(/^\//, ''))
+        
+        if (oldPath.startsWith(uploadsDir + path.sep)) {
+          await fs.unlink(oldPath)
+        }
       } catch {
         // Old file might not exist, ignore
       }

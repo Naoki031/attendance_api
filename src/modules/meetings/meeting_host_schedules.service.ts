@@ -3,13 +3,16 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
+import * as moment from 'moment'
 import { MeetingHostSchedule, HostScheduleType } from './entities/meeting_host_schedule.entity'
 import { Meeting } from './entities/meeting.entity'
 import { CreateHostScheduleDto } from './dto/create-host-schedule.dto'
 import { UpdateHostScheduleDto } from './dto/update-host-schedule.dto'
+import { SwapDatesDto } from './dto/swap-dates.dto'
 
 /** Priority order: most specific type wins when multiple schedules match the same date. */
 const SCHEDULE_TYPE_PRIORITY: Record<HostScheduleType, number> = {
@@ -152,11 +155,170 @@ export class MeetingHostSchedulesService {
     return this.resolveHostForDate(meeting.id, date)
   }
 
+  /**
+   * Excludes a single date from a schedule so that date is no longer covered.
+   * For one_time schedules whose only date matches, the record is deleted entirely.
+   */
+  async excludeDate(
+    scheduleId: number,
+    meetingUuid: string,
+    requestUserId: number,
+    date: string,
+    isPrivileged = false,
+  ): Promise<void> {
+    this.assertDateNotPast(date)
+    const meeting = await this.findMeetingByUuid(meetingUuid)
+    this.assertCanManage(meeting, requestUserId, isPrivileged)
+
+    const schedule = await this.findScheduleById(scheduleId, meeting.id)
+
+    // For one_time: just delete — excluding the only date leaves an empty record
+    if (schedule.schedule_type === HostScheduleType.ONE_TIME) {
+      await this.scheduleRepository.remove(schedule)
+      return
+    }
+
+    // For date_list: remove the specific date from the array
+    if (schedule.schedule_type === HostScheduleType.DATE_LIST) {
+      const updated = (schedule.dates ?? []).filter((dateItem) => dateItem !== date)
+      if (updated.length === 0) {
+        await this.scheduleRepository.remove(schedule)
+        return
+      }
+      await this.scheduleRepository.update({ id: schedule.id }, { dates: updated })
+      return
+    }
+
+    // For date_range / recurring: add to excluded_dates
+    const excluded = [...(schedule.excluded_dates ?? []), date]
+    await this.scheduleRepository.update({ id: schedule.id }, { excluded_dates: excluded })
+  }
+
+  /**
+   * Truncates a schedule so it no longer covers the given date or any date after it.
+   * The schedule is deleted if it would cover no dates after truncation.
+   */
+  async truncateFromDate(
+    scheduleId: number,
+    meetingUuid: string,
+    requestUserId: number,
+    date: string,
+    isPrivileged = false,
+  ): Promise<void> {
+    this.assertDateNotPast(date)
+    const meeting = await this.findMeetingByUuid(meetingUuid)
+    this.assertCanManage(meeting, requestUserId, isPrivileged)
+
+    const schedule = await this.findScheduleById(scheduleId, meeting.id)
+    const dayBefore = moment(date).subtract(1, 'day').format('YYYY-MM-DD')
+
+    switch (schedule.schedule_type) {
+      case HostScheduleType.ONE_TIME:
+        // The one date is being removed — delete the record
+        await this.scheduleRepository.remove(schedule)
+        return
+
+      case HostScheduleType.DATE_LIST: {
+        const remaining = (schedule.dates ?? []).filter((dateItem) => dateItem < date)
+        if (remaining.length === 0) {
+          await this.scheduleRepository.remove(schedule)
+          return
+        }
+        await this.scheduleRepository.update({ id: schedule.id }, { dates: remaining })
+        return
+      }
+
+      case HostScheduleType.DATE_RANGE:
+        if (!schedule.date_from || dayBefore < schedule.date_from) {
+          // Entire range is removed
+          await this.scheduleRepository.remove(schedule)
+          return
+        }
+        await this.scheduleRepository.update({ id: schedule.id }, { date_to: dayBefore })
+        return
+
+      case HostScheduleType.RECURRING:
+        await this.scheduleRepository.update({ id: schedule.id }, { recur_end_date: dayBefore })
+        return
+    }
+  }
+
+  /**
+   * Swaps the hosts of two dates atomically.
+   * Finds who is scheduled on each date, excludes those dates from their
+   * existing schedules, then creates new one_time entries with the hosts swapped.
+   */
+  async swapDates(
+    meetingUuid: string,
+    requestUserId: number,
+    dto: SwapDatesDto,
+    isPrivileged = false,
+  ): Promise<void> {
+    const meeting = await this.findMeetingByUuid(meetingUuid)
+    this.assertCanManage(meeting, requestUserId, isPrivileged)
+
+    if (dto.date_a === dto.date_b) {
+      throw new BadRequestException('Cannot swap a date with itself')
+    }
+
+    const resolvedA = await this.resolveScheduleForDate(meeting.id, dto.date_a)
+    const resolvedB = await this.resolveScheduleForDate(meeting.id, dto.date_b)
+
+    if (!resolvedA) {
+      throw new BadRequestException(`No host scheduled on ${dto.date_a}`)
+    }
+    if (!resolvedB) {
+      throw new BadRequestException(`No host scheduled on ${dto.date_b}`)
+    }
+    if (resolvedA.userId === resolvedB.userId) {
+      throw new BadRequestException('Both dates are hosted by the same person — nothing to swap')
+    }
+
+    // Step 1: exclude each date from its current schedule
+    const excludedA = [...(resolvedA.schedule.excluded_dates ?? []), dto.date_a]
+    const excludedB = [...(resolvedB.schedule.excluded_dates ?? []), dto.date_b]
+
+    await Promise.all([
+      resolvedA.schedule.schedule_type === HostScheduleType.ONE_TIME
+        ? this.scheduleRepository.remove(resolvedA.schedule)
+        : this.scheduleRepository.update(
+            { id: resolvedA.schedule.id },
+            { excluded_dates: excludedA },
+          ),
+      resolvedB.schedule.schedule_type === HostScheduleType.ONE_TIME
+        ? this.scheduleRepository.remove(resolvedB.schedule)
+        : this.scheduleRepository.update(
+            { id: resolvedB.schedule.id },
+            { excluded_dates: excludedB },
+          ),
+    ])
+
+    // Step 2: create new one_time entries with swapped hosts
+    await this.scheduleRepository.save([
+      this.scheduleRepository.create({
+        meeting_id: meeting.id,
+        user_id: resolvedB.userId, // host B now covers date A
+        schedule_type: HostScheduleType.ONE_TIME,
+        date: dto.date_a,
+        is_active: true,
+      }),
+      this.scheduleRepository.create({
+        meeting_id: meeting.id,
+        user_id: resolvedA.userId, // host A now covers date B
+        schedule_type: HostScheduleType.ONE_TIME,
+        date: dto.date_b,
+        is_active: true,
+      }),
+    ])
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
   private matchesDate(schedule: MeetingHostSchedule, dateString: string): boolean {
+    if ((schedule.excluded_dates ?? []).includes(dateString)) return false
+
     switch (schedule.schedule_type) {
       case HostScheduleType.ONE_TIME:
         return schedule.date === dateString
@@ -316,6 +478,41 @@ export class MeetingHostSchedulesService {
       default:
         return []
     }
+  }
+
+  /** Throws BadRequestException if the given date is strictly in the past (before today). */
+  private assertDateNotPast(date: string): void {
+    const today = moment(new Date()).format('YYYY-MM-DD')
+    if (date < today) {
+      throw new BadRequestException(`Cannot modify a past date: ${date}`)
+    }
+  }
+
+  /**
+   * Returns the best-matching active schedule and resolved userId for a given date.
+   * Returns null if no schedule covers the date.
+   */
+  private async resolveScheduleForDate(
+    meetingId: number,
+    date: string,
+  ): Promise<{ schedule: MeetingHostSchedule; userId: number } | null> {
+    const schedules = await this.scheduleRepository.find({
+      where: { meeting_id: meetingId, is_active: true },
+    })
+
+    const matching = schedules.filter((schedule) => this.matchesDate(schedule, date))
+    if (matching.length === 0) return null
+
+    matching.sort((scheduleA, scheduleB) => {
+      const priorityDiff =
+        SCHEDULE_TYPE_PRIORITY[scheduleB.schedule_type] -
+        SCHEDULE_TYPE_PRIORITY[scheduleA.schedule_type]
+      if (priorityDiff !== 0) return priorityDiff
+      return scheduleB.created_at.getTime() - scheduleA.created_at.getTime()
+    })
+
+    const winner = matching[0]!
+    return { schedule: winner, userId: winner.user_id }
   }
 
   private async findMeetingByUuid(uuid: string): Promise<Meeting> {

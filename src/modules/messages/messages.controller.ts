@@ -1,5 +1,4 @@
 import { Controller, Get, Query, Param } from '@nestjs/common'
-import { Public } from '@/modules/auth/decorators/public.decorator'
 import { MessagesService } from './messages.service'
 import { ChatRoomService } from '../chat/chat-room.service'
 import { QueryMessagesDto } from './dto/query-messages.dto'
@@ -12,7 +11,6 @@ export class MessagesController {
   ) {}
 
   @Get('thread/:messageId')
-  @Public()
   async findThreadReplies(@Param('messageId') messageId: number) {
     return this.messagesService.findByThread(messageId)
   }
