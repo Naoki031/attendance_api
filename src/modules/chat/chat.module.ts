@@ -30,6 +30,6 @@ import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.mod
   ],
   controllers: [ChatRoomController],
   providers: [ChatService, ChatRoomService, ChatGateway],
-  exports: [ChatService, ChatRoomService],
+  exports: [ChatService, ChatRoomService, ChatGateway],
 })
 export class ChatModule {}

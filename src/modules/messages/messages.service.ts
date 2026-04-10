@@ -162,6 +162,23 @@ export class MessagesService {
     return map
   }
 
+  /**
+   * Returns all messages in a room that have no translation cache entry.
+   * Used to batch-retranslate after cache is cleared.
+   */
+  async findUntranslatedByRoom(
+    roomId: number,
+  ): Promise<Array<{ id: number; content: string; detected_lang: string }>> {
+    return this.messageRepository.query(
+      `SELECT m.id, m.content, m.detected_lang
+       FROM messages m
+       LEFT JOIN translation_cache tc ON tc.message_id = m.id
+       WHERE m.room_id = ? AND tc.message_id IS NULL
+       ORDER BY m.id ASC`,
+      [roomId],
+    )
+  }
+
   async update(id: number, data: { content: string; previousContent: string }): Promise<Message> {
     const message = await this.messageRepository.findOneBy({ id })
 

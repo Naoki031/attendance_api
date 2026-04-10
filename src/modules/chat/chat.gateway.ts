@@ -99,6 +99,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`Client connected: ${client.id}`)
   }
 
+  broadcastTranslations(
+    roomId: number,
+    messageId: number,
+    translations: Record<string, string>,
+  ): void {
+    this.server
+      .to(`room_${roomId}`)
+      .emit('message_translations_ready', { id: messageId, translations })
+  }
+
   handleDisconnect(client: Socket) {
     for (const [roomId, users] of this.roomUsers.entries()) {
       if (!users.has(client.id)) continue
@@ -274,6 +284,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return
     }
 
+    if (content.trim().length > 2000) {
+      client.emit('error', { message: 'Message content cannot exceed 2000 characters' })
+
+      return
+    }
+
     try {
       const result = await this.chatService.sendMessage({
         roomId,
@@ -359,6 +375,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return
     }
 
+    if (newContent.trim().length > 2000) {
+      client.emit('error', { message: 'Message content cannot exceed 2000 characters' })
+
+      return
+    }
+
     try {
       const result = await this.chatService.editMessage({
         messageId,
@@ -428,6 +450,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!payload.content?.trim()) {
       client.emit('error', { message: 'Message content cannot be empty' })
+
+      return
+    }
+
+    if (payload.content.trim().length > 2000) {
+      client.emit('error', { message: 'Message content cannot exceed 2000 characters' })
 
       return
     }

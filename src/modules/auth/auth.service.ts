@@ -162,10 +162,10 @@ export class AuthService {
     // Delete old avatar file if exists — validate path stays within uploads/avatars to prevent traversal
     if (user.avatar) {
       try {
-        const uploadsDir = path.resolve(process.cwd(), 'uploads', 'avatars')
+        const uploadsDirectory = path.resolve(process.cwd(), 'uploads', 'avatars')
         const oldPath = path.resolve(process.cwd(), user.avatar.replace(/^\//, ''))
-        
-        if (oldPath.startsWith(uploadsDir + path.sep)) {
+
+        if (oldPath.startsWith(uploadsDirectory + path.sep)) {
           await fs.unlink(oldPath)
         }
       } catch {

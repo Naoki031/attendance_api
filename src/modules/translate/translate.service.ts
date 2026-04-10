@@ -5,35 +5,273 @@ import { Repository } from 'typeorm'
 import Anthropic from '@anthropic-ai/sdk'
 import { TranslationCache } from './entities/translation_cache.entity'
 
-const IT_TERMS_PRESERVED = [
-  'API',
-  'SDK',
-  'bug',
-  'fix',
-  'deploy',
-  'staging',
-  'production',
-  'backend',
-  'frontend',
-  'database',
-  'server',
-  'cache',
-  'debug',
-  'commit',
-  'merge',
-  'PR',
-  'branch',
-  'Docker',
-  'CI/CD',
-  'login',
-  'logout',
-  'dashboard',
-  'token',
-  'session',
-  'payload',
-  'request',
-  'response',
-].join(', ')
+// IT/dev terms that must stay as-is. Exclude common English words (request, session, token)
+// that have natural translations in conversational context.
+const IT_TERMS_PRESERVED =
+  'API, SDK, bug, fix, deploy, staging, production, backend, frontend, database, server, cache, debug, commit, merge, PR, branch, Docker, CI/CD, dashboard'
+
+// Attendance-domain terms that must stay as-is — they are app-specific labels.
+const ATTENDANCE_TERMS_PRESERVED = 'WFH, check-in, check-out, clock-in, clock-out, overtime'
+
+type MessageIntent = 'caring' | 'technical' | 'neutral'
+
+/**
+ * Detects the intent of a message to decide which style rules to apply post-translation.
+ * Runs on the original source text before any LLM call.
+ */
+function detectIntent(text: string): MessageIntent {
+  const lower = text.toLowerCase()
+
+  const caringKeywords = [
+    'sức khoẻ',
+    'sức khỏe',
+    'nghỉ ngơi',
+    'nghỉ ngơi',
+    'chăm sóc',
+    'khoẻ mạnh',
+    'khỏe mạnh',
+    'health',
+    'rest',
+    'take care',
+    'get well',
+    'feel better',
+    'recover',
+    '健康',
+    '休',
+    '体',
+    'お大事',
+    '気をつけ',
+  ]
+
+  const technicalKeywords = [
+    'api',
+    'bug',
+    'error',
+    'deploy',
+    'fix',
+    'merge',
+    'commit',
+    'staging',
+    'production',
+    'server',
+    'database',
+    'ci/cd',
+    'docker',
+    'build',
+    'crash',
+    'log',
+    'debug',
+  ]
+
+  if (caringKeywords.some((keyword) => lower.includes(keyword))) return 'caring'
+  if (technicalKeywords.some((keyword) => lower.includes(keyword))) return 'technical'
+
+  return 'neutral'
+}
+
+type JapaneseTone = 'casual' | 'polite'
+
+interface PhrasePool {
+  casual: string[]
+  polite: string[]
+}
+
+// Each cluster has casual and polite variants — selection matches the detected output tone.
+// Add more entries to any pool to increase variation over time.
+const JA_PHRASE_POOLS: Record<string, PhrasePool> = {
+  takecare: {
+    polite: [
+      'お体に気をつけてくださいね',
+      '無理しないでくださいね',
+      '体調に気をつけてくださいね',
+      'ご自愛くださいね',
+    ],
+    casual: ['体に気をつけてね', '無理しないでね', '体調に気をつけてね', '体を大事にしてね'],
+  },
+  stayHealthy: {
+    polite: [
+      '元気でいてくださいね',
+      'ずっと元気でいてくださいね',
+      '元気でいてもらえると嬉しいです',
+      'いつも元気でいられるといいですね',
+    ],
+    casual: ['元気でいてね', 'ずっと元気でいてね', '元気でいてくれると嬉しいな', 'いつも元気でね'],
+  },
+  help: {
+    polite: [
+      '困ったことがあればいつでも声をかけてください',
+      '何かあればいつでも頼ってくださいね',
+      '遠慮なく言ってくださいね',
+    ],
+    casual: [
+      '困ったことがあればいつでも声かけてね',
+      '何かあったらいつでも頼ってね',
+      '遠慮なく言ってね',
+    ],
+  },
+  rest: {
+    polite: [
+      'ゆっくり休んでくださいね',
+      'しっかり休んでくださいね',
+      '無理せずゆっくり休んでください',
+    ],
+    casual: ['ゆっくり休んでね', 'しっかり休んでね', '無理せず休んでね'],
+  },
+}
+
+function pickRandom(pool: string[]): string {
+  return pool[Math.floor(Math.random() * pool.length)] ?? (pool[0] as string)
+}
+
+function pickFromPool(pool: PhrasePool, tone: JapaneseTone): string {
+  return pickRandom(pool[tone])
+}
+
+/**
+ * Detects whether the LLM-generated Japanese output is casual or polite.
+ * Used to select matching phrase variants and normalize tone consistency.
+ */
+function detectJapaneseTone(text: string): JapaneseTone {
+  const politeCount = (text.match(/(?:ます|です)[。！？\s]|ください|でしょう|いたします/g) ?? [])
+    .length
+  const casualCount = (
+    text.match(/[ねよな][。！？\s]|だね|だよ|じゃん|[るくい]よ[。！]|てる[。！\s]/g) ?? []
+  ).length
+
+  return politeCount >= casualCount ? 'polite' : 'casual'
+}
+
+/**
+ * Normalizes leftover tone inconsistencies after phrase replacement.
+ * Only called for 'caring' intent. Does NOT perform full morphological rewriting —
+ * targets the most common mixing pattern (〜てください after casual context).
+ */
+function normalizeMixedTone(text: string, tone: JapaneseTone): string {
+  if (tone === 'casual') {
+    return text.replace(/てくださいね[。！]/g, 'てね。').replace(/てください[。！]/g, 'てね。')
+  }
+
+  return text
+}
+
+/**
+ * Applies intent-aware post-processing to Japanese translation output.
+ * Only called when targetLang is Japanese.
+ *
+ * - 'caring': strip あなた + tone-matched phrase variation + tone normalization
+ * - 'technical': strip あなた only — do NOT modify style
+ * - 'neutral': strip あなた only
+ */
+function applyJapaneseStyleRules(text: string, intent: MessageIntent): string {
+  // Always: strip unnatural subject pronouns (all intents)
+  let result = text
+    .replace(/あなたは?\s*/g, '')
+    .replace(/あなたも?\s*/g, '')
+    .replace(/君は?\s*/g, '')
+    .replace(/君も?\s*/g, '')
+
+  if (intent !== 'caring') {
+    return result.replace(/\s{2,}/g, ' ').trim()
+  }
+
+  // Detect tone of LLM output — select phrase variants accordingly
+  const tone = detectJapaneseTone(result)
+
+  // Context-aware replacement: 大切にしてください only when health/body context is present
+  result = result.replace(/大切にしてください/g, (match, _offset, full: string) => {
+    if (/健康|体|お体|元気/.test(full)) return pickFromPool(JA_PHRASE_POOLS.takecare, tone)
+    return match
+  })
+
+  result = result
+    .replace(/支援が必要な時は/g, () => pickFromPool(JA_PHRASE_POOLS.help, tone))
+    .replace(/サポートが必要なら/g, () => pickFromPool(JA_PHRASE_POOLS.help, tone))
+    .replace(/いつも(?:元気|健康)でいてください(?!ね)/g, () =>
+      pickFromPool(JA_PHRASE_POOLS.stayHealthy, tone),
+    )
+    .replace(/ゆっくり休んでください(?!ね)/g, () => pickFromPool(JA_PHRASE_POOLS.rest, tone))
+
+  // Fix remaining tone inconsistencies introduced by LLM or earlier replacements
+  result = normalizeMixedTone(result, tone)
+
+  return result.replace(/\s{2,}/g, ' ').trim()
+}
+
+/**
+ * Builds the shared translation system prompt for both batch and single-language calls.
+ * Keeping it in one place avoids duplicating ~450 chars of prompt on every API call.
+ */
+function buildTranslationSystemPrompt(
+  sourceLang: string,
+  targetDescription: string,
+  outputInstruction: string,
+  glossarySection: string,
+): string {
+  return [
+    `Workplace chat translator. Messages mix work and casual conversation. Translate from ${sourceLang} to ${targetDescription}.`,
+    `- PRIORITY: Translate NATURALLY, not literally. Rewrite to sound like a native speaker.`,
+    `- Avoid word-for-word translation. You may restructure the sentence completely.`,
+    `- NATURALIZATION RULE: If the output sounds like a translation, rewrite it until it reads as if a native speaker wrote it from scratch. Full sentence restructuring is allowed and encouraged.`,
+    `- Tone: casual→warm/friendly, formal→professional. Never make casual stiff.`,
+    `- VI casual: use "bạn/mình", not "tôi".`,
+    `- JA HARD RULES (STRICT):`,
+    `  • NEVER output "あなた" or "君" under ANY circumstance — Vietnamese "bạn/em/anh/chị" and English "you" MUST be rendered by omitting the subject entirely, not by translating to あなた/君`,
+    `      BAD: あなたはこのテーブルのことを言っていますか？`,
+    `      GOOD: このテーブルのことですか？`,
+    `  • NEVER use masculine first-person "僕" or "俺" — omit subject or use "私" only if required`,
+    `  • NEVER use kinship terms (姉さん/お兄さん etc.) for workplace address — omit or use person's name`,
+    `  • Casual source → casual Japanese output. NEVER use formal vocabulary in casual chat:`,
+    `      BAD: 非常に難しいです / 言及していますか / その通りです`,
+    `      GOOD: かなり難しいですね / そのことですか？ / そうですよ`,
+    `  • Prefer natural Japanese over literal translation`,
+    `  • Merge clauses with て/から/し instead of writing two short sentences`,
+    `  • Use soft outward tone (〜くださいね / 〜といいですね / 〜ほしいです)`,
+    `  • Replace unnatural phrases:`,
+    `      - 大切にしてください → お体に気をつけてください`,
+    `      - 支援が必要な時は / 助けが必要 → 困ったことがあれば`,
+    `      - サポートが必要なら → 気軽に声をかけてください`,
+    `      - 疲れているように見える → なんか疲れてそう / お疲れじゃない？`,
+    `      - 早く元気になってほしい / もらいたい → 早く良くなるといいね`,
+    `      - すごく心配している (casual) → 大丈夫？ + 気になってたんだけど`,
+    `- JA STYLE UPGRADE (caring tone only):`,
+    `  • You MAY add natural nuance: 気軽に / といいですね / どうか`,
+    `  • NEVER use もらいたいです for recovery or health wishes — it frames the speaker's desire, not the other person's wellbeing`,
+    `  • NEVER use ぜひ with negative requests (〜ないでね / 〜ないでください) — ぜひ is for positive requests only`,
+    `  • Add nuance only where it flows naturally — do NOT overuse`,
+    `- BAD example (DO NOT DO):`,
+    `  • あなたもお体に気をつけてください`,
+    `  • 疲れているように見えるよ。ゆっくり休んでね。 (literal + segmented)`,
+    `  • 早く元気になってもらいたいです。 (speaker-centric framing)`,
+    `- GOOD example:`,
+    `  • ちょっとお疲れみたいだし、無理せずゆっくり休んでね。`,
+    `  • 困ったことがあれば気軽に声をかけてね。早く良くなるといいね🙏`,
+    `- Avoid unnatural Japanese:`,
+    `  • 大切にしてください (for health context)`,
+    `  • 疲れているように見える (for "you look tired" context)`,
+    `  • もらいたいです for recovery/health wishing`,
+    `- JA fixed phrases: よろしくお願いします="Thanks in advance"; かしこまりました="Certainly"; お疲れ様です="Good work"`,
+    `- Keep as-is: ${IT_TERMS_PRESERVED}; ${ATTENDANCE_TERMS_PRESERVED}`,
+    `- Profanity → replace with [***], do not translate vulgarity`,
+    glossarySection,
+    `- Keep ALL emojis exactly as-is — do NOT remove, replace, or convert them:`,
+    `  • Unicode emoji (🙏😅🎉) → keep exactly`,
+    `  • Custom emoji codes (:blob-sob: :yoyo-haha: :any-word:) → keep EXACTLY including the colons — NEVER convert to Unicode`,
+    `- Script purity: output language must use ONLY that script — never mix scripts (e.g., no Japanese/Chinese characters inside Vietnamese or English output). If a term cannot be translated, use the closest equivalent or romanize it — NEVER keep original script characters.`,
+    `- Keep markdown: @mentions, links, code`,
+    `- Do NOT translate proper nouns, URLs, ticket IDs`,
+    `- Translate ONLY what is in the source — do NOT add phrases, sentences, or emoji not present in the original`,
+    `- FINAL SELF-CHECK (MANDATORY before output):`,
+    `  • Does this sound like a native speaker wrote it?`,
+    `  • Is there any "translated feeling"? → rewrite if yes`,
+    `  • Are short clauses merged into one natural sentence instead of two flat ones?`,
+    `  • Is the emotional weight appropriate? (workplace casual = light, not dramatic)`,
+    `  • Ensure NO "あなた" or "君" exists — if found, rewrite with implicit subject`,
+    `  • If any check fails → rewrite before returning`,
+    `- Return format strictly: ${outputInstruction}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 
 @Injectable()
 export class TranslateService {
@@ -80,8 +318,13 @@ export class TranslateService {
       const response = await this.client.messages.create({
         model: this.model,
         max_tokens: 10,
-        system:
+        system: [
           'Detect the language of the provided text. Return ONLY the ISO 639-1 language code (e.g. vi, en, ja, ko, zh). No explanation, no punctuation, just the code.',
+          'CRITICAL: Japanese (ja) and Chinese (zh) disambiguation rules:',
+          '- If the text contains ANY hiragana (あいうえお etc.) or katakana (アイウエオ etc.) characters → ALWAYS return "ja", never "zh".',
+          '- Japanese business messages (です、ます、ください、おねがい etc.) are always "ja".',
+          '- Return "zh" ONLY when you are certain the text is Chinese with no Japanese kana characters.',
+        ].join('\n'),
         messages: [{ role: 'user', content: text }],
       })
 
@@ -117,20 +360,18 @@ export class TranslateService {
 
     const glossarySection =
       glossaryTerms.length > 0
-        ? `\n- Glossary terms (translate consistently): ${glossaryTerms.join(', ')}`
+        ? `- Glossary (translate consistently): ${glossaryTerms.join(', ')}`
         : ''
 
-    const systemPrompt = [
-      `You are a professional translator. Translate the text inside <text> tags from ${sourceLang} to ALL of these languages: ${targetLangs.join(', ')}.`,
-      `- NEVER translate these IT terms, keep them as-is: ${IT_TERMS_PRESERVED}`,
+    const systemPrompt = buildTranslationSystemPrompt(
+      sourceLang,
+      `ALL of: ${targetLangs.join(', ')}`,
+      `- Return JSON {"lang":"translation",...}. ONLY JSON, no markdown, no explanation.`,
       glossarySection,
-      `- Return a JSON object with language codes as keys and translations as values.`,
-      `- Example: {"en": "Hello", "ja": "こんにちは"}`,
-      `- Return ONLY the JSON, no explanation, no markdown, no code fences.`,
-      `- Translate faithfully. Do NOT add, remove, or rephrase content.`,
-      `- Keep ALL markdown formatting intact: @mentions, [link text](url), > blockquotes, **bold**, *italic*, \`code\`.`,
-      `- Do NOT translate proper nouns, usernames, @mentions, URLs, ticket IDs (e.g. TB-123), or code snippets.`,
-    ].join('\n')
+    )
+
+    // Cap max_tokens dynamically — output is bounded by input size (2 langs ≈ 3× input chars)
+    const dynamicMaxTokens = Math.min(this.maxTokens, Math.ceil(truncated.length * 3) + 300)
 
     const result = await this.tryTranslateWithModel(
       this.model,
@@ -138,6 +379,7 @@ export class TranslateService {
       targetLangs.join(','),
       systemPrompt,
       undefined,
+      dynamicMaxTokens,
     )
 
     if (!result) {
@@ -226,23 +468,30 @@ export class TranslateService {
 
     const glossarySection =
       glossaryTerms.length > 0
-        ? `\n- Glossary terms (translate consistently): ${glossaryTerms.join(', ')}`
+        ? `- Glossary (translate consistently): ${glossaryTerms.join(', ')}`
         : ''
 
-    const systemPrompt = [
-      `You are a professional translator. Translate the text inside <text> tags from ${sourceLang} to ${targetLang}.`,
-      `- NEVER translate these IT terms, keep them as-is: ${IT_TERMS_PRESERVED}`,
-      glossarySection,
+    const systemPrompt = buildTranslationSystemPrompt(
+      sourceLang,
+      targetLang,
       `- Return ONLY the translated text, no explanation, no markdown wrapper, no quotes.`,
-      `- Keep ALL markdown formatting intact: @mentions, [link text](url), > blockquotes, **bold**, *italic*, \`code\`.`,
-      `- Do NOT translate proper nouns, usernames, @mentions, URLs, ticket IDs (e.g. TB-123), or code snippets.`,
-    ].join('\n')
-
-    this.logger.log(
-      `translateToSingle — target=${targetLang} len=${truncated.length} maxTokens=${this.maxTokens}`,
+      glossarySection,
     )
 
-    return this.tryTranslateWithModel(this.model, truncated, targetLang, systemPrompt, onChunk)
+    const dynamicMaxTokens = Math.min(this.maxTokens, Math.ceil(truncated.length * 1.5) + 200)
+
+    this.logger.log(
+      `translateToSingle — target=${targetLang} len=${truncated.length} maxTokens=${dynamicMaxTokens}`,
+    )
+
+    return this.tryTranslateWithModel(
+      this.model,
+      truncated,
+      targetLang,
+      systemPrompt,
+      onChunk,
+      dynamicMaxTokens,
+    )
   }
 
   async getOrCreateTranslations(
@@ -328,6 +577,7 @@ export class TranslateService {
     targetLang: string,
     systemPrompt: string,
     onChunk?: (chunk: string) => void,
+    maxTokens?: number,
   ): Promise<string | null> {
     if (!this.client) return null
 
@@ -335,13 +585,15 @@ export class TranslateService {
     const maxRetries = 2
     const requestPayload = {
       model,
-      max_tokens: this.maxTokens,
+      max_tokens: maxTokens ?? this.maxTokens,
       system: systemPrompt,
       messages: [{ role: 'user' as const, content: `<text>${text}</text>` }],
     }
+    const isJapaneseTarget = targetLang.includes('ja')
+    const intent = isJapaneseTarget ? detectIntent(text) : 'neutral'
 
     this.logger.log(
-      `translateToSingle — target=${targetLang} mode=${useStreaming ? 'stream' : 'sync'}`,
+      `translateToSingle — target=${targetLang} intent=${intent} mode=${useStreaming ? 'stream' : 'sync'}`,
     )
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -362,17 +614,23 @@ export class TranslateService {
             `translateToSingle done — target=${targetLang} stopReason=${finalMessage.stop_reason} resultLen=${fullText.length}`,
           )
 
-          return fullText.trim() || null
+          const streamResult = fullText.trim() || null
+
+          return streamResult && isJapaneseTarget
+            ? applyJapaneseStyleRules(streamResult, intent)
+            : streamResult
         } else {
           const response = await this.client.messages.create(requestPayload, { timeout: 60_000 })
           const block = response.content[0]
-          const result = block.type === 'text' ? block.text.trim() : null
+          const rawResult = block.type === 'text' ? block.text.trim() : null
 
           this.logger.log(
-            `translateToSingle done — target=${targetLang} stopReason=${response.stop_reason} resultLen=${result?.length ?? 0}`,
+            `translateToSingle done — target=${targetLang} stopReason=${response.stop_reason} resultLen=${rawResult?.length ?? 0}`,
           )
 
-          return result || null
+          return rawResult && isJapaneseTarget
+            ? applyJapaneseStyleRules(rawResult, intent)
+            : rawResult
         }
       } catch (error) {
         const status = (error as { status?: number }).status

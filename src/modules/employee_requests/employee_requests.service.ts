@@ -1,3 +1,4 @@
+import * as moment from 'moment'
 import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { In, Repository } from 'typeorm'
@@ -127,31 +128,33 @@ export class EmployeeRequestsService {
       })
 
       if (requestWithUser) {
+        const companyId = await this.getCompanyId(requestingUser.id)
+
         const feature = this.mapTypeToFeature(createDto.type)
-        const channel = await this.slackChannelsService.findByFeature(feature)
-        const approvers = await this.findApproversForChannel(channel?.mention_user_ids)
+        const channel = await this.slackChannelsService.findByFeature(
+          feature,
+          companyId ?? undefined,
+        )
+        const approvers = await this.findApproversForChannel(channel?.mention_user_ids, companyId)
         const slackMessage = await this.buildSlackMessage(
           requestWithUser,
           approvers,
           channel?.message_template,
         )
-        await this.slackChannelsService.sendMessage(feature, slackMessage)
+        await this.slackChannelsService.sendMessage(feature, slackMessage, companyId ?? undefined)
 
         // Append row to Google Sheet and store the row index for later approval update
-        {
-          const companyId = await this.getCompanyId(requestingUser.id)
-          if (companyId) {
-            const rowIndex = await this.googleSheetsService.appendRequestRow(
-              requestWithUser,
-              companyId,
-              requestWithUser.type,
+        if (companyId) {
+          const rowIndex = await this.googleSheetsService.appendRequestRow(
+            requestWithUser,
+            companyId,
+            requestWithUser.type,
+          )
+          if (rowIndex) {
+            await this.employeeRequestRepository.update(
+              { id: created.id },
+              { sheet_row_index: rowIndex },
             )
-            if (rowIndex) {
-              await this.employeeRequestRepository.update(
-                { id: created.id },
-                { sheet_row_index: rowIndex },
-              )
-            }
           }
         }
 
@@ -171,7 +174,6 @@ export class EmployeeRequestsService {
         }
 
         // Notify all users in the same company via WebSocket
-        const companyId = await this.getCompanyId(requestingUser.id)
         if (companyId) {
           this.eventsGateway.emitRequestCreated(companyId, requestWithUser)
         }
@@ -417,7 +419,7 @@ export class EmployeeRequestsService {
       request.forget_date &&
       request.from_datetime
     ) {
-      const clockTime = new Date(request.from_datetime).toISOString().substring(11, 19)
+      const clockTime = moment.utc(request.from_datetime).format('HH:mm:ss')
       try {
         await this.attendanceLogsService.applyClockForget(
           request.user_id,
@@ -445,14 +447,17 @@ export class EmployeeRequestsService {
   /**
    * Returns approvers for a Slack mention:
    * - If the channel has configured mention_user_ids, load those users.
-   * - Otherwise fall back to all active admin / super_admin users.
+   * - Otherwise fall back to all active admin / super_admin users in the same company.
    */
-  private async findApproversForChannel(mentionUserIds?: number[]): Promise<User[]> {
+  private async findApproversForChannel(
+    mentionUserIds?: number[],
+    companyId?: number | null,
+  ): Promise<User[]> {
     if (mentionUserIds?.length) {
       return this.userRepository.find({ where: { id: In(mentionUserIds) } })
     }
 
-    return this.userRepository
+    const query = this.userRepository
       .createQueryBuilder('user')
       .innerJoin('user.user_group_permissions', 'ugp')
       .innerJoin('ugp.permission_group', 'pg')
@@ -460,7 +465,14 @@ export class EmployeeRequestsService {
         names: ['admin', 'super_admin', 'super admin', 'superadmin', 'super'],
       })
       .andWhere('user.is_activated = :activated', { activated: true })
-      .getMany()
+
+    if (companyId) {
+      query
+        .innerJoin('user.user_departments', 'ud')
+        .andWhere('ud.company_id = :companyId', { companyId })
+    }
+
+    return query.getMany()
   }
 
   /**
@@ -480,15 +492,7 @@ export class EmployeeRequestsService {
   private formatDatetimeFull(date: Date | string | undefined): string {
     if (!date) return '—'
 
-    return new Date(date).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    })
+    return moment.utc(date).format('MMM D, YYYY, h:mm:ss A')
   }
 
   /**
@@ -497,12 +501,8 @@ export class EmployeeRequestsService {
    */
   private formatDateShort(date: Date | string | undefined): string {
     if (!date) return '—'
-    const dateObject = new Date(date)
-    const day = String(dateObject.getDate()).padStart(2, '0')
-    const month = String(dateObject.getMonth() + 1).padStart(2, '0')
-    const year = dateObject.getFullYear()
 
-    return `${day}/${month}/${year}`
+    return moment.utc(date).format('DD/MM/YYYY')
   }
 
   /**
@@ -786,7 +786,7 @@ export class EmployeeRequestsService {
   }
 
   /**
-   * Maps request type to slack channel feature enum.
+   * Builds the Slack message for a business trip request.
    */
   private buildBusinessTripMessage(request: EmployeeRequest, approvers: User[]): string {
     const requesterMention = this.slackMention(request.user)
@@ -818,6 +818,9 @@ export class EmployeeRequestsService {
     return this.buildMessage(header, body)
   }
 
+  /**
+   * Maps request type to slack channel feature enum.
+   */
   private mapTypeToFeature(type: EmployeeRequestType): SlackChannelFeature {
     const map: Record<EmployeeRequestType, SlackChannelFeature> = {
       [EmployeeRequestType.WFH]: SlackChannelFeature.WFH,

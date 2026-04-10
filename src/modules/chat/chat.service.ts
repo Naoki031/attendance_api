@@ -27,13 +27,17 @@ export class ChatService {
     private readonly messagesService: MessagesService,
   ) {}
 
-  private async getGlossaryTerms(_roomId: number): Promise<string[]> {
-    try {
-      return []
-    } catch (error) {
-      this.logger.error('Failed to get glossary terms', error)
-      return []
-    }
+  private getGlossaryTerms(): string[] {
+    // Attendance-domain vocabulary that must translate consistently across all messages.
+    // These are business terms specific to this app — AI must use the same translation every time.
+    return [
+      'leave request → yêu cầu nghỉ phép (vi) / 休暇申請 (ja)',
+      'approve → duyệt (vi) / 承認 (ja)',
+      'reject → từ chối (vi) / 却下 (ja)',
+      'pending → chờ duyệt (vi) / 保留中 (ja)',
+      'attendance → chấm công (vi) / 勤怠 (ja)',
+      'payroll → bảng lương (vi) / 給与 (ja)',
+    ]
   }
 
   async sendMessage(parameters: {
@@ -117,7 +121,7 @@ export class ChatService {
     const targetLangs = SUPPORTED_LANGUAGES.filter(
       (language) => language !== parameters.detectedLang,
     )
-    const glossary = await this.getGlossaryTerms(parameters.roomId)
+    const glossary = this.getGlossaryTerms()
 
     // Strip leading quote block before translating, then reattach to each translation
     let quotePrefix: string | null = null
