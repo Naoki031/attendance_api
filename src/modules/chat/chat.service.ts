@@ -47,7 +47,9 @@ export class ChatService {
     avatar: string
     content: string
   }): Promise<BroadcastPayload> {
-    const detectedLang = await this.translateService.detectLanguage(parameters.content)
+    const detectedLang = this.translateService.isTranslatableContent(parameters.content)
+      ? await this.translateService.detectLanguage(parameters.content)
+      : 'unknown'
 
     const message = await this.messagesService.create({
       roomId: parameters.roomId,
@@ -85,7 +87,9 @@ export class ChatService {
       throw new Error('Parent message not found')
     }
 
-    const detectedLang = await this.translateService.detectLanguage(parameters.content)
+    const detectedLang = this.translateService.isTranslatableContent(parameters.content)
+      ? await this.translateService.detectLanguage(parameters.content)
+      : 'unknown'
 
     const message = await this.messagesService.create({
       roomId: parameters.roomId,
@@ -118,6 +122,8 @@ export class ChatService {
     onChunk?: (lang: string, chunk: string) => void
     forceRefresh?: boolean
   }): Promise<Record<string, string>> {
+    if (parameters.detectedLang === 'unknown') return {}
+
     const targetLangs = SUPPORTED_LANGUAGES.filter(
       (language) => language !== parameters.detectedLang,
     )
@@ -156,6 +162,28 @@ export class ChatService {
     return translations
   }
 
+  async deleteMessage(parameters: { messageId: number; userId: number }): Promise<void> {
+    const message = await this.messagesService.findOne(parameters.messageId)
+
+    if (!message) {
+      throw new Error('Message not found')
+    }
+
+    if (message.user_id !== parameters.userId) {
+      throw new Error('You can only delete your own messages')
+    }
+
+    const fifteenMinutesMs = 15 * 60 * 1000
+    const elapsed = Date.now() - new Date(message.created_at).getTime()
+
+    if (elapsed > fifteenMinutesMs) {
+      throw new Error('Messages can only be deleted within 15 minutes')
+    }
+
+    await this.messagesService.softDelete(parameters.messageId)
+    await this.translateService.invalidateCache(parameters.messageId)
+  }
+
   async editMessage(parameters: {
     messageId: number
     userId: number
@@ -186,10 +214,9 @@ export class ChatService {
       previousContent: message.content,
     })
 
-    // Content changed — old translations are stale
-    await this.translateService.invalidateCache(parameters.messageId)
-
-    const detectedLang = await this.translateService.detectLanguage(parameters.newContent)
+    const detectedLang = this.translateService.isTranslatableContent(parameters.newContent)
+      ? await this.translateService.detectLanguage(parameters.newContent)
+      : 'unknown'
 
     return {
       id: updatedMessage.id,

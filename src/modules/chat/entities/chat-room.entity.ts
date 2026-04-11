@@ -54,6 +54,9 @@ export class ChatRoom {
   })
   visibility!: ChatRoomVisibility
 
+  @Column({ nullable: true, name: 'meeting_id' })
+  meeting_id?: number
+
   @Column({ name: 'creator_id' })
   creator_id!: number
 

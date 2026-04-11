@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { Repository, In, MoreThan, IsNull } from 'typeorm'
 import { ConfigService } from '@nestjs/config'
 import { AccessToken } from 'livekit-server-sdk'
 import { v4 as uuidv4 } from 'uuid'
@@ -10,9 +10,13 @@ import { Meeting, MeetingStatus, MeetingType } from './entities/meeting.entity'
 import { MeetingParticipant, MeetingParticipantRole } from './entities/meeting_participant.entity'
 import { MeetingPin } from './entities/meeting_pin.entity'
 import { MeetingCompany } from './entities/meeting_company.entity'
+import { MeetingInvite, MeetingInviteStatus } from './entities/meeting_invite.entity'
 import { CreateMeetingDto } from './dto/create-meeting.dto'
 import { UpdateMeetingDto } from './dto/update-meeting.dto'
 import { FilterMeetingDto } from './dto/filter-meeting.dto'
+import { CreateInvitesDto } from './dto/create-invites.dto'
+import { RsvpDto } from './dto/rsvp.dto'
+import moment from 'moment'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 import { UsersService } from '@/modules/users/users.service'
 
@@ -29,6 +33,8 @@ export class MeetingsService {
     private readonly meetingPinRepository: Repository<MeetingPin>,
     @InjectRepository(MeetingCompany)
     private readonly meetingCompanyRepository: Repository<MeetingCompany>,
+    @InjectRepository(MeetingInvite)
+    private readonly inviteRepository: Repository<MeetingInvite>,
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
   ) {}
@@ -51,7 +57,7 @@ export class MeetingsService {
       host_id: hostId,
       status: MeetingStatus.SCHEDULED,
       livekit_room_name: `meeting-${uuidv4()}`,
-      scheduled_at: dto.scheduled_at ? new Date(dto.scheduled_at) : undefined,
+      scheduled_at: dto.scheduled_at ? moment(dto.scheduled_at).toDate() : undefined,
       meeting_type: dto.meeting_type ?? MeetingType.ONE_TIME,
       schedule_time: dto.schedule_time,
       schedule_day_of_week: dto.schedule_day_of_week,
@@ -114,14 +120,21 @@ export class MeetingsService {
       .leftJoin('meeting.pins', 'pin', 'pin.user_id = :userId', { userId })
       .addSelect('CASE WHEN pin.id IS NOT NULL THEN 1 ELSE 0 END', 'is_pinned_raw')
 
-    // Visibility: only show meetings whose company list includes one of the user's companies.
-    // Meetings with no company associations are not visible to any regular user.
+    // Visibility: show meetings if the user is host, a participant, or shares a company with the meeting.
+    // This ensures hosts/participants always see their meetings even if user_departments is empty.
     if (!isPrivileged) {
       query.andWhere(
-        `meeting.id IN (
-          SELECT mc.meeting_id FROM meeting_companies mc
-          INNER JOIN user_departments ud ON ud.company_id = mc.company_id
-          WHERE ud.user_id = :userId
+        `(
+          meeting.host_id = :userId
+          OR meeting.id IN (
+            SELECT p.meeting_id FROM meeting_participants p
+            WHERE p.user_id = :userId
+          )
+          OR meeting.id IN (
+            SELECT mc.meeting_id FROM meeting_companies mc
+            INNER JOIN user_departments ud ON ud.company_id = mc.company_id
+            WHERE ud.user_id = :userId
+          )
         )`,
         { userId },
       )
@@ -240,7 +253,7 @@ export class MeetingsService {
     if (dto.title !== undefined) meeting.title = dto.title
     if (dto.description !== undefined) meeting.description = dto.description
     if (dto.meeting_type !== undefined) meeting.meeting_type = dto.meeting_type
-    if (dto.scheduled_at !== undefined) meeting.scheduled_at = new Date(dto.scheduled_at)
+    if (dto.scheduled_at !== undefined) meeting.scheduled_at = moment(dto.scheduled_at).toDate()
     if (dto.schedule_time !== undefined) meeting.schedule_time = dto.schedule_time
     if (dto.schedule_day_of_week !== undefined)
       meeting.schedule_day_of_week = dto.schedule_day_of_week
@@ -330,6 +343,12 @@ export class MeetingsService {
         role: MeetingParticipantRole.PARTICIPANT,
       })
       await this.participantRepository.save(participant)
+    } else if (existing.left_at != null) {
+      // Participant is rejoining — clear left_at so cleanupStuckMeetings counts them correctly
+      await this.participantRepository.update(
+        { id: existing.id },
+        { left_at: null as unknown as Date },
+      )
     }
 
     return jwt
@@ -338,7 +357,7 @@ export class MeetingsService {
   async recordLeave(meetingId: number, userId: number): Promise<void> {
     await this.participantRepository.update(
       { meeting_id: meetingId, user_id: userId },
-      { left_at: new Date() },
+      { left_at: moment().toDate() },
     )
   }
 
@@ -346,7 +365,7 @@ export class MeetingsService {
   async setActive(meetingId: number): Promise<void> {
     await this.meetingRepository.update(
       { id: meetingId, status: MeetingStatus.SCHEDULED },
-      { status: MeetingStatus.ACTIVE, started_at: new Date() },
+      { status: MeetingStatus.ACTIVE, started_at: moment().toDate() },
     )
   }
 
@@ -390,8 +409,7 @@ export class MeetingsService {
    */
   @Cron('0 0 * * *')
   async deleteOldMeetings(): Promise<void> {
-    const oneMonthAgo = new Date()
-    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
+    const oneMonthAgo = moment().subtract(1, 'month').toDate()
 
     const oldMeetings = await this.meetingRepository
       .createQueryBuilder('meeting')
@@ -419,7 +437,7 @@ export class MeetingsService {
     for (const meeting of stuckMeetings) {
       // Check if any participant is still in the meeting (no left_at)
       const activeParticipants = await this.participantRepository.count({
-        where: { meeting_id: meeting.id, left_at: undefined as unknown as null },
+        where: { meeting_id: meeting.id, left_at: IsNull() },
       })
 
       if (activeParticipants === 0) {
@@ -427,6 +445,196 @@ export class MeetingsService {
         this.logger.warn(`Cleaned up stuck meeting #${meeting.id} (${meeting.uuid})`)
       }
     }
+  }
+
+  /**
+   * Sends invites to a list of users for a meeting.
+   * Only the host (or privileged user) can invite.
+   * Already-invited users are skipped silently.
+   */
+  async createInvites(
+    meetingUuid: string,
+    inviterId: number,
+    dto: CreateInvitesDto,
+    isPrivileged: boolean,
+  ): Promise<MeetingInvite[]> {
+    const meeting = await this.findByUuid(meetingUuid)
+    if (meeting.host_id !== inviterId && !isPrivileged) {
+      throw new ForbiddenException('Only the host can send invites')
+    }
+
+    // Guard: TypeORM find({ where: [] }) with an empty array returns ALL rows (no WHERE clause).
+    // Return early to avoid accidentally re-inviting everyone previously invited.
+    if (dto.user_ids.length === 0) return []
+
+    const existing = await this.inviteRepository.find({
+      where: dto.user_ids.map((userId) => ({ meeting_id: meeting.id, user_id: userId })),
+      select: ['id', 'user_id', 'status'],
+    })
+
+    // Skip users who already have a pending invite (still waiting to respond)
+    // Accepted invites from a previous session are treated as completed — user can be re-invited
+    const existingActiveIds = new Set(
+      existing
+        .filter((invite) => invite.status === MeetingInviteStatus.PENDING)
+        .map((invite) => invite.user_id),
+    )
+
+    // Re-invite users whose previous invite was accepted, missed, or declined (reset to pending)
+    const toReinvite = existing.filter((invite) => invite.status !== MeetingInviteStatus.PENDING)
+    const reinvitedIds: number[] = []
+    for (const invite of toReinvite) {
+      await this.inviteRepository.update({ id: invite.id }, { status: MeetingInviteStatus.PENDING })
+      reinvitedIds.push(invite.id)
+    }
+
+    // Create fresh invites for users with no previous invite
+    const newUserIds = dto.user_ids.filter(
+      (userId) =>
+        !existingActiveIds.has(userId) && !toReinvite.some((invite) => invite.user_id === userId),
+    )
+    const newInvites = newUserIds.map((userId) =>
+      this.inviteRepository.create({
+        meeting_id: meeting.id,
+        user_id: userId,
+        invited_by: inviterId,
+        status: MeetingInviteStatus.PENDING,
+      }),
+    )
+    const savedNew = await this.inviteRepository.save(newInvites)
+
+    // Return all newly created + re-invited records with user relation loaded
+    const allIds = [...savedNew.map((invite) => invite.id), ...reinvitedIds]
+    if (allIds.length === 0) return []
+
+    return this.inviteRepository.find({
+      where: { id: In(allIds) },
+      relations: ['user'],
+    })
+  }
+
+  /**
+   * Marks a pending invite as missed (called by the gateway timeout).
+   * Only updates if the invite is still pending to avoid overwriting a late response.
+   */
+  async markInviteMissed(meetingId: number, userId: number): Promise<void> {
+    await this.inviteRepository.update(
+      { meeting_id: meetingId, user_id: userId, status: MeetingInviteStatus.PENDING },
+      { status: MeetingInviteStatus.MISSED },
+    )
+  }
+
+  /**
+   * Returns all invites for a meeting with user info.
+   * Only the host (or privileged user) can view all invites.
+   */
+  async getInvites(meetingUuid: string, requesterId: number, isPrivileged: boolean) {
+    const meeting = await this.findByUuid(meetingUuid)
+    if (meeting.host_id !== requesterId && !isPrivileged) {
+      throw new ForbiddenException('Only the host can view invites')
+    }
+
+    return this.inviteRepository.find({
+      where: { meeting_id: meeting.id },
+      relations: ['user'],
+      order: { created_at: 'ASC' },
+    })
+  }
+
+  /**
+   * Records the RSVP response of an invited user.
+   * Only the invited user themselves can respond.
+   */
+  async rsvp(meetingUuid: string, userId: number, dto: RsvpDto): Promise<MeetingInvite> {
+    const meeting = await this.findByUuid(meetingUuid)
+    const invite = await this.inviteRepository.findOne({
+      where: { meeting_id: meeting.id, user_id: userId },
+    })
+
+    if (!invite) {
+      throw new NotFoundException('Invite not found')
+    }
+
+    await this.inviteRepository.update(
+      { id: invite.id },
+      { status: dto.status as MeetingInviteStatus },
+    )
+    return (await this.inviteRepository.findOne({ where: { id: invite.id } })) as MeetingInvite
+  }
+
+  /**
+   * Cancels (removes) an invite. Only the host or privileged user can cancel.
+   */
+  async cancelInvite(
+    meetingUuid: string,
+    targetUserId: number,
+    requesterId: number,
+    isPrivileged: boolean,
+  ): Promise<{ inviteId: number; meetingId: number } | null> {
+    const meeting = await this.findByUuid(meetingUuid)
+    if (meeting.host_id !== requesterId && !isPrivileged) {
+      throw new ForbiddenException('Only the host can cancel invites')
+    }
+
+    const invite = await this.inviteRepository.findOne({
+      where: { meeting_id: meeting.id, user_id: targetUserId },
+    })
+
+    await this.inviteRepository.delete({ meeting_id: meeting.id, user_id: targetUserId })
+
+    return invite ? { inviteId: invite.id, meetingId: meeting.id } : null
+  }
+
+  /**
+   * Returns all missed invites for the current user from the last 24 hours.
+   * Used to restore missed-call banners when the user comes back online.
+   */
+  async getMissedInvites(
+    userId: number,
+  ): Promise<{ meetingTitle: string; meetingUuid: string; missedAt: string }[]> {
+    const since = moment().subtract(24, 'hours').toDate()
+
+    const invites = await this.inviteRepository.find({
+      where: {
+        user_id: userId,
+        status: MeetingInviteStatus.MISSED,
+        updated_at: MoreThan(since),
+      },
+      relations: ['meeting'],
+      order: { updated_at: 'DESC' },
+    })
+
+    return invites
+      .filter((invite) => invite.meeting)
+      .map((invite) => ({
+        meetingTitle: invite.meeting.title,
+        meetingUuid: invite.meeting.uuid,
+        missedAt: invite.updated_at
+          ? moment.utc(invite.updated_at).toISOString()
+          : moment().toISOString(),
+      }))
+  }
+
+  /**
+   * Returns all pending invites for the current user across all meetings.
+   * Used to populate RSVP banners on the meetings list page in a single query.
+   */
+  async getPendingInvites(userId: number): Promise<MeetingInvite[]> {
+    return this.inviteRepository.find({
+      where: { user_id: userId, status: MeetingInviteStatus.PENDING },
+      relations: ['meeting'],
+      order: { created_at: 'DESC' },
+    })
+  }
+
+  /**
+   * Returns the current user's RSVP status for a meeting (if invited).
+   */
+  async getMyInvite(meetingUuid: string, userId: number): Promise<MeetingInvite | null> {
+    const meeting = await this.findByUuid(meetingUuid)
+    return this.inviteRepository.findOne({
+      where: { meeting_id: meeting.id, user_id: userId },
+    })
   }
 
   /**

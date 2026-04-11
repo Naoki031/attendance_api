@@ -9,10 +9,14 @@ import {
 } from '@nestjs/websockets'
 import type { Server, Socket } from 'socket.io'
 import { Logger } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import moment from 'moment'
 import { MeetingsService } from './meetings.service'
 import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 import { SpeechService } from './speech.service'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
+import { FirebaseService } from '@/modules/firebase/firebase.service'
+import { UsersService } from '@/modules/users/users.service'
 
 // Common Whisper hallucination patterns — generated when audio is silence/noise
 const HALLUCINATION_PATTERNS = [
@@ -83,24 +87,20 @@ function isWhisperHallucination(text: string): boolean {
 
 interface JoinMeetingPayload {
   meetingId: number
-  userId: number
   username: string
 }
 
 interface TransferHostPayload {
   meetingId: number
-  fromUserId: number
   toUserId: number
 }
 
 interface LeaveMeetingPayload {
   meetingId: number
-  userId: number
 }
 
 interface SpeakerStatePayload {
   meetingId: number
-  userId: number
   enabled: boolean
 }
 
@@ -182,15 +182,41 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   // meetingId → userId of current runtime host (ephemeral, reset per session)
   private readonly runtimeHosts = new Map<number, number>()
 
+  // inviteId → pending call timeout entry (auto-expires after CALL_TIMEOUT_MS)
+  private static readonly CALL_TIMEOUT_MS = 30_000
+
+  private readonly inviteTimeouts = new Map<
+    number,
+    { meetingId: number; userId: number; userName: string; timer: ReturnType<typeof setTimeout> }
+  >()
+
   constructor(
     private readonly meetingsService: MeetingsService,
     private readonly hostSchedulesService: MeetingHostSchedulesService,
     private readonly speechService: SpeechService,
     private readonly slackChannelsService: SlackChannelsService,
+    private readonly firebaseService: FirebaseService,
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
   ) {}
 
   handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`)
+    try {
+      const token =
+        (client.handshake.auth as Record<string, string>).token ??
+        client.handshake.headers.authorization?.replace('Bearer ', '')
+
+      if (!token) {
+        client.disconnect()
+        return
+      }
+
+      const payload = this.jwtService.verify<{ id: number }>(token)
+      client.data.userId = payload.id
+      this.logger.log(`Client connected: ${client.id} (userId=${payload.id})`)
+    } catch {
+      client.disconnect()
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -241,6 +267,8 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   @SubscribeMessage('join_meeting')
   handleJoinMeeting(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinMeetingPayload) {
+    // Use verified userId from JWT, not the client-supplied payload
+    const userId = client.data.userId as number
     const roomName = `meeting_${payload.meetingId}`
     client.join(roomName)
 
@@ -249,7 +277,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     this.activeParticipants.get(payload.meetingId)!.set(client.id, {
-      userId: payload.userId,
+      userId,
       username: payload.username,
     })
 
@@ -271,11 +299,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
           // Resolve scheduled host for today and set as runtime host.
           // When no schedule exists (null), fall back to the first joiner.
-          const today = new Date().toISOString().slice(0, 10)
+          const today = moment().format('YYYY-MM-DD')
           const scheduledHostId = await this.hostSchedulesService
             .resolveHostForDate(payload.meetingId, today)
             .catch(() => null)
-          const resolvedHostId = scheduledHostId ?? payload.userId
+          const resolvedHostId = scheduledHostId ?? userId
           this.runtimeHosts.set(payload.meetingId, resolvedHostId)
           this.server.to(`meeting_${payload.meetingId}`).emit('host_changed', {
             meetingId: payload.meetingId,
@@ -293,18 +321,20 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     // Default new joiner's speaker to enabled (they can override with speaker_state event)
-    this.speakerStates.get(payload.meetingId)!.set(payload.userId, true)
+    this.speakerStates.get(payload.meetingId)!.set(userId, true)
 
     // Build current speaker states snapshot for the joining user
     const speakerStatesSnapshot: Record<number, boolean> = {}
 
-    for (const [userId, enabled] of this.speakerStates.get(payload.meetingId)!.entries()) {
-      speakerStatesSnapshot[userId] = enabled
+    for (const [participantUserId, enabled] of this.speakerStates
+      .get(payload.meetingId)!
+      .entries()) {
+      speakerStatesSnapshot[participantUserId] = enabled
     }
 
     // Notify others
     client.to(roomName).emit('participant_joined', {
-      userId: payload.userId,
+      userId,
       username: payload.username,
       meetingId: payload.meetingId,
     })
@@ -327,7 +357,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Notify list page of updated live participants (covers 2nd, 3rd... joins)
     this.emitParticipantsUpdated(payload.meetingId)
 
-    this.logger.log(`User ${payload.userId} joined meeting ${payload.meetingId}`)
+    this.logger.log(`User ${userId} joined meeting ${payload.meetingId}`)
   }
 
   @SubscribeMessage('leave_meeting')
@@ -335,6 +365,8 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: LeaveMeetingPayload,
   ) {
+    // Use verified userId from JWT, not the client-supplied payload
+    const userId = client.data.userId as number
     const roomName = `meeting_${payload.meetingId}`
     client.leave(roomName)
 
@@ -346,11 +378,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     this.server.to(roomName).emit('participant_left', {
-      userId: payload.userId,
+      userId,
       meetingId: payload.meetingId,
     })
 
-    this.meetingsService.recordLeave(payload.meetingId, payload.userId).catch((error) => {
+    this.meetingsService.recordLeave(payload.meetingId, userId).catch((error) => {
       this.logger.error('Failed to record participant leave', error)
     })
 
@@ -379,8 +411,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   @SubscribeMessage('subscribe_meetings_list')
   handleSubscribeMeetingsList(@ConnectedSocket() client: Socket) {
+    // Use verified userId from JWT for personal room subscription
+    const userId = client.data.userId as number
     client.join('meetings_list')
-    this.logger.log(`Client ${client.id} subscribed to meetings_list`)
+    client.join(`user_${userId}`)
+    this.logger.log(`Client ${client.id} subscribed to meetings_list and user_${userId}`)
 
     // Send current live state so client can show correct status without reload
     const liveState: Record<number, number[]> = {}
@@ -406,10 +441,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TransferHostPayload,
   ) {
+    // Use verified userId from JWT as the "from" user
+    const userId = client.data.userId as number
     const currentRuntimeHost = this.runtimeHosts.get(payload.meetingId)
 
     // Only the current runtime host can transfer
-    if (currentRuntimeHost !== payload.fromUserId) {
+    if (currentRuntimeHost !== userId) {
       client.emit('error', { message: 'Only the current host can transfer host rights' })
 
       return
@@ -436,20 +473,22 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     })
 
     this.logger.log(
-      `Host transferred in meeting ${payload.meetingId}: ${payload.fromUserId} → ${payload.toUserId}`,
+      `Host transferred in meeting ${payload.meetingId}: ${userId} → ${payload.toUserId}`,
     )
   }
 
   @SubscribeMessage('end_meeting')
   async handleEndMeeting(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { meetingId: number; userId: number },
+    @MessageBody() payload: { meetingId: number },
   ) {
+    // Use verified userId from JWT
+    const userId = client.data.userId as number
     const hostId = await this.meetingsService.findHostIdById(payload.meetingId).catch(() => null)
 
     const runtimeHostId = this.runtimeHosts.get(payload.meetingId)
-    const isRuntimeHost = runtimeHostId === payload.userId
-    const isOwner = hostId === payload.userId
+    const isRuntimeHost = runtimeHostId === userId
+    const isOwner = hostId === userId
 
     if (hostId === null || (!isRuntimeHost && !isOwner)) {
       client.emit('error', { message: 'Only the host can end the meeting' })
@@ -493,7 +532,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.logger.error('Failed to reset meeting to scheduled after end_meeting', error)
       })
 
-    this.logger.log(`Meeting ${payload.meetingId} ended by host ${payload.userId}`)
+    this.logger.log(`Meeting ${payload.meetingId} ended by host ${userId}`)
   }
 
   @SubscribeMessage('speaker_state')
@@ -501,16 +540,19 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SpeakerStatePayload,
   ) {
+    // Use verified userId from JWT
+    const userId = client.data.userId as number
+
     // Persist so new joiners receive current state in meeting_state snapshot
     if (!this.speakerStates.has(payload.meetingId)) {
       this.speakerStates.set(payload.meetingId, new Map())
     }
 
-    this.speakerStates.get(payload.meetingId)!.set(payload.userId, payload.enabled)
+    this.speakerStates.get(payload.meetingId)!.set(userId, payload.enabled)
 
     // Broadcast to all other participants in the meeting room (excluding sender)
     client.to(`meeting_${payload.meetingId}`).emit('speaker_state', {
-      userId: payload.userId,
+      userId,
       enabled: payload.enabled,
       meetingId: payload.meetingId,
     })
@@ -519,17 +561,19 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   @SubscribeMessage('cursor_move')
   handleCursorMove(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { meetingId: number; userId: number; x: number; y: number },
+    @MessageBody() payload: { meetingId: number; x: number; y: number },
   ) {
-    client.to(`meeting_${payload.meetingId}`).emit('cursor_move', payload)
+    const userId = client.data.userId as number
+    client.to(`meeting_${payload.meetingId}`).emit('cursor_move', { ...payload, userId })
   }
 
   @SubscribeMessage('cursor_hide')
   handleCursorHide(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { meetingId: number; userId: number },
+    @MessageBody() payload: { meetingId: number },
   ) {
-    client.to(`meeting_${payload.meetingId}`).emit('cursor_hide', payload)
+    const userId = client.data.userId as number
+    client.to(`meeting_${payload.meetingId}`).emit('cursor_hide', { ...payload, userId })
   }
 
   @SubscribeMessage('screen_marker')
@@ -539,19 +583,19 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     payload: {
       meetingId: number
       id: string
-      userId: number
       x: number
       y: number
       color: string
       timestamp: number
     },
   ) {
-    client.to(`meeting_${payload.meetingId}`).emit('screen_marker', payload)
+    const userId = client.data.userId as number
+    client.to(`meeting_${payload.meetingId}`).emit('screen_marker', { ...payload, userId })
   }
 
   @SubscribeMessage('screen_marker_clear')
   handleScreenMarkerClear(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() _client: Socket,
     @MessageBody() payload: { meetingId: number },
   ) {
     this.server.to(`meeting_${payload.meetingId}`).emit('screen_marker_clear')
@@ -623,7 +667,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     ttsEnabled: boolean,
     isScreenAudio: boolean,
   ) {
-    const subtitleId = `${participant.userId}-${Date.now()}`
+    const subtitleId = `${participant.userId}-${moment().valueOf()}`
 
     ;(async () => {
       try {
@@ -715,13 +759,14 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: AnnotationDrawPayload,
   ) {
-    // Broadcast stroke to all other participants — sender renders locally without waiting
-    client.to(`meeting_${payload.meetingId}`).emit('annotation_draw', payload)
+    // Replace client-supplied userId with JWT-verified identity to prevent spoofing
+    const userId = client.data.userId as number
+    client.to(`meeting_${payload.meetingId}`).emit('annotation_draw', { ...payload, userId })
   }
 
   @SubscribeMessage('annotation_clear')
   handleAnnotationClear(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() _client: Socket,
     @MessageBody() payload: AnnotationClearPayload,
   ) {
     // Broadcast clear to all participants including sender for consistency
@@ -734,7 +779,6 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     @MessageBody()
     payload: {
       meetingId: number
-      userId: number
       creatorName: string
       question: string
       options: string[]
@@ -742,9 +786,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       participantIds: number[]
     },
   ) {
+    // Use verified userId from JWT
+    const userId = client.data.userId as number
+
     const vote: MeetingVotePayload = {
-      id: `vote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      createdBy: payload.userId,
+      id: `vote-${moment().valueOf()}-${Math.random().toString(36).slice(2, 7)}`,
+      createdBy: userId,
       creatorName: payload.creatorName,
       question: payload.question,
       options: payload.options.map((text, index) => ({
@@ -755,7 +802,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       votes: {},
       participantIds: payload.participantIds,
       status: 'active',
-      createdAt: Date.now(),
+      createdAt: moment().valueOf(),
     }
 
     if (!this.activeVotes.has(payload.meetingId)) {
@@ -775,10 +822,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     payload: {
       meetingId: number
       voteId: string
-      userId: number
       optionIds: string[]
     },
   ) {
+    // Use verified userId from JWT
+    const userId = client.data.userId as number
+
     const votes = this.activeVotes.get(payload.meetingId)
     if (!votes) return
 
@@ -786,7 +835,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!vote || vote.status !== 'active') return
 
     // Check if user is allowed to vote (empty participantIds = everyone)
-    if (vote.participantIds.length > 0 && !vote.participantIds.includes(payload.userId)) return
+    if (vote.participantIds.length > 0 && !vote.participantIds.includes(userId)) return
 
     const validIds = vote.options.map((option) => option.id)
     const selectedIds = payload.optionIds.filter((id) => validIds.includes(id))
@@ -796,7 +845,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (selectedIds.length === 0) return
 
     // Record or update vote (allows changing selection while vote is active)
-    vote.votes[payload.userId] = selectedIds
+    vote.votes[userId] = selectedIds
 
     // Broadcast updated vote to all participants
     this.server.to(`meeting_${payload.meetingId}`).emit('vote_updated', vote)
@@ -805,8 +854,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   @SubscribeMessage('vote_close')
   handleVoteClose(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { meetingId: number; voteId: string; userId: number },
+    @MessageBody() payload: { meetingId: number; voteId: string },
   ) {
+    // Use verified userId from JWT
+    const userId = client.data.userId as number
+
     const votes = this.activeVotes.get(payload.meetingId)
     if (!votes) return
 
@@ -814,7 +866,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!vote || vote.status !== 'active') return
 
     // Only the creator can close the vote
-    if (vote.createdBy !== payload.userId) return
+    if (vote.createdBy !== userId) return
 
     vote.status = 'closed'
 
@@ -824,8 +876,136 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   broadcastSubtitleUpdate(payload: SubtitleUpdatePayload) {
     this.server.to(`meeting_${payload.meetingId}`).emit('subtitle_update', {
       ...payload,
-      timestamp: Date.now(),
+      timestamp: moment().valueOf(),
     })
+  }
+
+  /**
+   * Emits a new_invite event to the invitee's personal room and broadcasts
+   * invite_sent to all current meeting participants. Starts a 30s auto-miss timer.
+   */
+  emitNewInvite(
+    userId: number,
+    data: {
+      meetingId: number
+      meetingTitle: string
+      meetingUuid: string
+      inviteId: number
+      userName: string
+      invitedBy: number
+    },
+  ) {
+    // Notify the invitee
+    this.server.to(`user_${userId}`).emit('new_invite', {
+      meetingId: data.meetingId,
+      meetingTitle: data.meetingTitle,
+      meetingUuid: data.meetingUuid,
+    })
+
+    // Notify everyone currently in the meeting room
+    this.server.to(`meeting_${data.meetingId}`).emit('invite_sent', {
+      userId,
+      userName: data.userName,
+    })
+
+    // Cancel any previous timeout for the same invite (re-invite case)
+    this.cancelInviteTimeout(data.inviteId)
+
+    // Start 30-second auto-miss timer
+    const timer = setTimeout(() => {
+      this.inviteTimeouts.delete(data.inviteId)
+
+      this.meetingsService.markInviteMissed(data.meetingId, userId).catch((error) => {
+        this.logger.error(`Failed to mark invite ${data.inviteId} as missed`, error)
+      })
+
+      // Tell the invitee they missed the call (online path via socket)
+      this.server.to(`user_${userId}`).emit('missed_call', {
+        meetingId: data.meetingId,
+        meetingTitle: data.meetingTitle,
+        meetingUuid: data.meetingUuid,
+        missedAt: moment().toISOString(),
+      })
+
+      // Tell the meeting room and the meetings index page that the call was missed
+      const missedPayload = {
+        meetingUuid: data.meetingUuid,
+        userId,
+        userName: data.userName,
+        result: 'missed' as const,
+      }
+      this.server.to(`meeting_${data.meetingId}`).emit('invite_result', missedPayload)
+      this.server.to('meetings_list').emit('invite_result', missedPayload)
+
+      // Offline path: send FCM push so the user sees it even when the app is closed
+      this.usersService
+        .getFcmTokensForUsers([userId])
+        .then((tokenMap) => {
+          const token = tokenMap.get(userId)
+          if (token) {
+            this.firebaseService
+              .sendToDevice(token, 'Missed call', data.meetingTitle, {
+                url: `/meetings/${data.meetingUuid}`,
+              })
+              .catch((error) => {
+                this.logger.warn(`FCM missed-call notification failed for user ${userId}: ${error}`)
+              })
+          }
+        })
+        .catch((error) => {
+          this.logger.warn(`Failed to fetch FCM token for user ${userId}: ${error}`)
+        })
+    }, MeetingsGateway.CALL_TIMEOUT_MS)
+
+    this.inviteTimeouts.set(data.inviteId, {
+      meetingId: data.meetingId,
+      userId,
+      userName: data.userName,
+      timer,
+    })
+  }
+
+  /**
+   * Cancels the auto-miss timer for an invite (called when the invitee responds).
+   */
+  cancelInviteTimeout(inviteId: number) {
+    const entry = this.inviteTimeouts.get(inviteId)
+    if (entry) {
+      clearTimeout(entry.timer)
+      this.inviteTimeouts.delete(inviteId)
+    }
+  }
+
+  /**
+   * Notifies the invitee that the host cancelled their invite — dismiss call modal on client.
+   */
+  emitInviteCancelled(userId: number, meetingUuid: string) {
+    this.server.to(`user_${userId}`).emit('invite_cancelled', { meetingUuid })
+  }
+
+  /**
+   * Broadcasts the RSVP result (accepted / declined) to:
+   * - All participants currently inside the meeting room (meeting_${meetingId})
+   * - Everyone on the meetings index page (meetings_list) so the invite dialog refreshes
+   *   regardless of which user originally created the invite.
+   */
+  emitInviteResult(
+    meetingId: number,
+    meetingUuid: string,
+    userId: number,
+    userName: string,
+    result: 'accepted' | 'declined',
+  ) {
+    const payload = { meetingUuid, userId, userName, result }
+    this.server.to(`meeting_${meetingId}`).emit('invite_result', payload)
+    this.server.to('meetings_list').emit('invite_result', payload)
+  }
+
+  /** Returns the user IDs of participants currently connected to the meeting room. */
+  getActiveUserIds(meetingId: number): Set<number> {
+    const participants = this.activeParticipants.get(meetingId)
+    if (!participants) return new Set()
+    return new Set(Array.from(participants.values()).map((participant) => participant.userId))
   }
 
   private emitParticipantsUpdated(meetingId: number) {

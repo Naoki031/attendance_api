@@ -33,6 +33,7 @@ import { MeetingParticipant } from '@/modules/meetings/entities/meeting_particip
 import { MeetingHostSchedule } from '@/modules/meetings/entities/meeting_host_schedule.entity'
 import { MeetingPin } from '@/modules/meetings/entities/meeting_pin.entity'
 import { MeetingCompany } from '@/modules/meetings/entities/meeting_company.entity'
+import { MeetingInvite } from '@/modules/meetings/entities/meeting_invite.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -72,6 +73,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         MeetingHostSchedule,
         MeetingPin,
         MeetingCompany,
+        MeetingInvite,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

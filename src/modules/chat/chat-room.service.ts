@@ -134,6 +134,52 @@ export class ChatRoomService {
   }
 
   /**
+   * Finds or creates a dedicated chat room for a meeting.
+   * The room is private so it won't appear in public discovery.
+   * The requesting user is automatically added as a member if not already one.
+   */
+  async findOrCreateMeetingRoom(
+    meetingId: number,
+    meetingUuid: string,
+    requesterId: number,
+  ): Promise<ChatRoom> {
+    let room = await this.chatRoomRepository.findOne({ where: { meeting_id: meetingId } })
+
+    if (!room) {
+      const newRoom = this.chatRoomRepository.create({
+        name: `meeting-${meetingUuid}`,
+        type: ChatRoomType.CHANNEL,
+        visibility: ChatRoomVisibility.PRIVATE,
+        creator_id: requesterId,
+        meeting_id: meetingId,
+      })
+      room = await this.chatRoomRepository.save(newRoom)
+
+      await this.chatRoomMemberRepository.save({
+        room_id: room.id,
+        user_id: requesterId,
+        role: ChatRoomMemberRole.ADMIN,
+      })
+    } else {
+      // Ensure the requesting user is a member (they may be a new participant)
+      const existing = await this.chatRoomMemberRepository.findOneBy({
+        room_id: room.id,
+        user_id: requesterId,
+      })
+
+      if (!existing) {
+        await this.chatRoomMemberRepository.save({
+          room_id: room.id,
+          user_id: requesterId,
+          role: ChatRoomMemberRole.MEMBER,
+        })
+      }
+    }
+
+    return room
+  }
+
+  /**
    * Finds an existing direct room between two users (if any).
    */
   private async findDirectRoomBetweenUsers(
@@ -173,7 +219,10 @@ export class ChatRoomService {
       relations: ['room', 'room.creator'],
     })
 
-    const rooms = memberships.map((membership) => membership.room!).filter(Boolean)
+    // Exclude meeting rooms — they are only accessible from within the meeting page
+    const rooms = memberships
+      .map((membership) => membership.room!)
+      .filter((room) => Boolean(room) && !room.meeting_id)
 
     // Fetch member counts for all rooms in one query
     const roomIds = rooms.map((room) => room.id)
@@ -547,6 +596,7 @@ export class ChatRoomService {
          AND (crm.last_read_at IS NULL OR m.created_at > crm.last_read_at)
        WHERE crm.user_id = ?
          AND cr.deleted_at IS NULL
+         AND cr.meeting_id IS NULL
        GROUP BY cr.uuid`,
       [userId, userId],
     )

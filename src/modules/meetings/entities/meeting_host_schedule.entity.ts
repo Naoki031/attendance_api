@@ -20,7 +20,7 @@ export enum HostScheduleType {
 @Entity('meeting_host_schedules')
 export class MeetingHostSchedule {
   @PrimaryGeneratedColumn()
-  id: number
+  id!: number
 
   @Column({ name: 'meeting_id' })
   meeting_id!: number
@@ -83,8 +83,8 @@ export class MeetingHostSchedule {
   is_active!: boolean
 
   @CreateDateColumn({ name: 'created_at' })
-  created_at: Date
+  created_at!: Date
 
   @UpdateDateColumn({ name: 'updated_at' })
-  updated_at: Date
+  updated_at!: Date
 }

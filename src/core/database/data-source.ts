@@ -32,6 +32,7 @@ import { MeetingParticipant } from '../../modules/meetings/entities/meeting_part
 import { MeetingHostSchedule } from '../../modules/meetings/entities/meeting_host_schedule.entity'
 import { MeetingPin } from '../../modules/meetings/entities/meeting_pin.entity'
 import { MeetingCompany } from '../../modules/meetings/entities/meeting_company.entity'
+import { MeetingInvite } from '../../modules/meetings/entities/meeting_invite.entity'
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
@@ -69,6 +70,7 @@ const options: DataSourceOptions & SeederOptions = {
     MeetingHostSchedule,
     MeetingPin,
     MeetingCompany,
+    MeetingInvite,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',

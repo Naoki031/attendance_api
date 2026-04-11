@@ -1,4 +1,4 @@
-import * as moment from 'moment'
+import moment from 'moment'
 import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { In, Repository } from 'typeorm'

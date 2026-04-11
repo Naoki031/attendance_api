@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   ValidationPipe,
+  UseGuards,
 } from '@nestjs/common'
 import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 import { CreateHostScheduleDto } from './dto/create-host-schedule.dto'
@@ -21,17 +22,22 @@ import { SwapDatesDto } from './dto/swap-dates.dto'
 import { User as UserDecorator } from '@/modules/auth/decorators/user.decorator'
 import type { User } from '@/modules/users/entities/user.entity'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
+import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
+import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
 
 @Controller('meetings/:uuid/host-schedules')
+@UseGuards(PermissionsGuard)
 export class MeetingHostSchedulesController {
   constructor(private readonly hostSchedulesService: MeetingHostSchedulesService) {}
 
   @Get()
+  @Permissions('all_privileges', 'read')
   findAll(@Param('uuid') uuid: string) {
     return this.hostSchedulesService.findAll(uuid)
   }
 
   @Get('resolve')
+  @Permissions('all_privileges', 'read')
   resolve(@Param('uuid') uuid: string, @Query('date') date: string) {
     return this.hostSchedulesService
       .resolveHostForDateByUuid(uuid, date)
@@ -39,6 +45,7 @@ export class MeetingHostSchedulesController {
   }
 
   @Post()
+  @Permissions('all_privileges', 'create')
   create(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
@@ -48,6 +55,7 @@ export class MeetingHostSchedulesController {
   }
 
   @Patch(':id')
+  @Permissions('all_privileges', 'update')
   update(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
@@ -59,6 +67,7 @@ export class MeetingHostSchedulesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'delete')
   remove(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
@@ -70,6 +79,7 @@ export class MeetingHostSchedulesController {
   /** Removes a single date from a schedule (adds to excluded_dates or deletes if one_time). */
   @Patch(':id/exclude-date')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'update')
   excludeDate(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
@@ -88,6 +98,7 @@ export class MeetingHostSchedulesController {
   /** Truncates a schedule: removes the given date and all dates after it. */
   @Patch(':id/truncate')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'update')
   truncate(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
@@ -106,6 +117,7 @@ export class MeetingHostSchedulesController {
   /** Swaps the hosts of two dates across all schedules of the meeting. */
   @Post('swap-dates')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'update')
   swapDates(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,

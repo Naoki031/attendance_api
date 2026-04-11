@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import * as moment from 'moment'
+import moment from 'moment'
 import { MeetingHostSchedule, HostScheduleType } from './entities/meeting_host_schedule.entity'
 import { Meeting } from './entities/meeting.entity'
 import { CreateHostScheduleDto } from './dto/create-host-schedule.dto'
@@ -482,7 +482,7 @@ export class MeetingHostSchedulesService {
 
   /** Throws BadRequestException if the given date is strictly in the past (before today). */
   private assertDateNotPast(date: string): void {
-    const today = moment(new Date()).format('YYYY-MM-DD')
+    const today = moment().format('YYYY-MM-DD')
     if (date < today) {
       throw new BadRequestException(`Cannot modify a past date: ${date}`)
     }

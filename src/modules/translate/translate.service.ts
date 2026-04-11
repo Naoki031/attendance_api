@@ -657,6 +657,98 @@ export class TranslateService {
     return null
   }
 
+  /**
+   * Returns true when the text has enough translatable content to justify an API call.
+   * Skips messages that are:
+   * - Too short (< 3 non-whitespace chars)
+   * - Emoji-only
+   * - Spam / test / meaningless (repetitive chars, test keywords, repeated single word)
+   * - Contain no Unicode letters (pure numbers, punctuation, symbols)
+   * - Contain only code with no natural-language words outside of code blocks/inline code
+   */
+  isTranslatableContent(text: string): boolean {
+    const stripped = text.replace(/\s/g, '')
+    if (stripped.length < 3) return false
+    if (this.isOnlyEmoji(stripped)) return false
+    if (this.isSpamContent(text)) return false
+
+    // Remove fenced code blocks (```...```) and inline code (`...`), then check what remains
+    const withoutCode = text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`\n]+`/g, '')
+      .trim()
+
+    if (withoutCode.length === 0) return false
+
+    return /\p{L}/u.test(withoutCode)
+  }
+
+  /**
+   * Returns true when the message is spam, a test, or has no real translatable meaning.
+   * Detects:
+   * - Exact test/noise phrases (en/vi/ja)
+   * - Single character repeated ≥ 4 times ("aaaa", "....", "!!!!")
+   * - Repeating 2–4 char pattern ≥ 3 cycles ("hahaha", "hehehe", "lololo", "xoxo")
+   * - Single unique word repeated ≥ 4 times ("ok ok ok ok ok", "ha ha ha ha")
+   */
+  private isSpamContent(text: string): boolean {
+    const lower = text.trim().toLowerCase()
+
+    // Exact-match phrases that are clearly test/noise (full message only)
+    const EXACT_SPAM = new Set([
+      // Test keywords
+      'test',
+      'testing',
+      'test.',
+      'test..',
+      'test...',
+      '1 2 3',
+      '1, 2, 3',
+      'hello world',
+      'ping',
+      'pong',
+      // Common keyboard mash
+      'abc',
+      'xyz',
+      'asdf',
+      'qwerty',
+      // Internet slang with no translation value
+      'lol',
+      'lmao',
+      'omg',
+      'wtf',
+      'brb',
+      'afk',
+      'kkk',
+      'zzz',
+      // Vietnamese test phrases
+      'thử',
+      'thử nghiệm',
+      'thử thôi',
+      'thử xem',
+      // Japanese test phrases
+      'テスト',
+      '試し',
+    ])
+
+    if (EXACT_SPAM.has(lower)) return true
+
+    const noSpaces = lower.replace(/\s+/g, '')
+    if (noSpaces.length < 3) return false
+
+    // Single character repeated ≥ 4 times: "aaaa", "....", "!!!!!"
+    if (/^(.)\1{3,}$/.test(noSpaces)) return true
+
+    // Repeating 2–4 character pattern ≥ 3 full cycles: "hahaha", "hehehe", "xoxoxo", "lololo"
+    if (/^(.{2,4})\1{2,}$/.test(noSpaces)) return true
+
+    // Single unique word repeated ≥ 4 times: "ok ok ok ok", "ha ha ha ha"
+    const words = lower.trim().split(/\s+/)
+    if (words.length >= 4 && new Set(words).size === 1) return true
+
+    return false
+  }
+
   private isOnlyEmoji(text: string): boolean {
     const stripped = text.replace(/\s/g, '')
     if (stripped.length === 0) return true

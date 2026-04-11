@@ -46,12 +46,13 @@ export class MessagesService {
 
     const results = await this.messageRepository.query(
       `SELECT m.*, CONCAT(u.first_name, ' ', u.last_name) as username, u.avatar, u.preferred_language as language, tc.translations,
-              (SELECT COUNT(*) FROM messages r WHERE r.parent_id = m.id) as reply_count
+              (SELECT COUNT(*) FROM messages r WHERE r.parent_id = m.id AND r.is_deleted = 0) as reply_count
        FROM messages m
        JOIN users u ON m.user_id = u.id
        LEFT JOIN translation_cache tc ON tc.message_id = m.id
        WHERE m.room_id = ?
          AND m.parent_id IS NULL
+         AND m.is_deleted = 0
          AND (? IS NULL OR m.id < ?)
        ORDER BY m.id DESC
        LIMIT ?`,
@@ -91,6 +92,7 @@ export class MessagesService {
        JOIN users u ON m.user_id = u.id
        LEFT JOIN translation_cache tc ON tc.message_id = m.id
        WHERE m.parent_id = ?
+         AND m.is_deleted = 0
        ORDER BY m.id ASC`,
       [parentMessageId],
     )
@@ -163,6 +165,13 @@ export class MessagesService {
   }
 
   /**
+   * Soft-deletes a message by setting is_deleted = true.
+   */
+  async softDelete(id: number): Promise<void> {
+    await this.messageRepository.update({ id }, { is_deleted: true })
+  }
+
+  /**
    * Returns all messages in a room that have no translation cache entry.
    * Used to batch-retranslate after cache is cleared.
    */
@@ -173,7 +182,7 @@ export class MessagesService {
       `SELECT m.id, m.content, m.detected_lang
        FROM messages m
        LEFT JOIN translation_cache tc ON tc.message_id = m.id
-       WHERE m.room_id = ? AND tc.message_id IS NULL
+       WHERE m.room_id = ? AND tc.message_id IS NULL AND m.is_deleted = 0
        ORDER BY m.id ASC`,
       [roomId],
     )

@@ -35,6 +35,9 @@ export class Message {
   @JoinColumn({ name: 'parent_id' })
   parent?: Message | null
 
+  @Column({ name: 'is_deleted', default: false })
+  is_deleted: boolean
+
   @Column({ name: 'created_at', type: 'datetime' })
   created_at: Date
 

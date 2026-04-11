@@ -49,6 +49,11 @@ interface EditMessagePayload {
   newContent: string
 }
 
+interface DeleteMessagePayload {
+  roomUuid: string
+  messageId: number
+}
+
 interface UpdateLanguagePayload {
   roomUuid: string
   language: string
@@ -421,6 +426,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `[Chat] Failed to edit messageId=${messageId} in room ${payload.roomUuid} by userId=${user.userId}: ${(error as Error).message}`,
       )
       const errorMessage = error instanceof Error ? error.message : 'Failed to edit message'
+      client.emit('error', { message: errorMessage })
+    }
+  }
+
+  @SubscribeMessage('delete_message')
+  async handleDeleteMessage(
+    @MessageBody() payload: DeleteMessagePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = await this.chatRoomService.findByUuid(payload.roomUuid).catch(() => null)
+
+    if (!room) {
+      client.emit('error', { message: 'Room not found' })
+      return
+    }
+
+    const roomId = room.id
+    const users = this.roomUsers.get(roomId)
+    const user = users?.get(client.id)
+
+    if (!user) {
+      client.emit('error', { message: 'You are not in this room' })
+      return
+    }
+
+    try {
+      await this.chatService.deleteMessage({
+        messageId: payload.messageId,
+        userId: user.userId,
+      })
+
+      this.server.to(`room_${roomId}`).emit('message_deleted', { messageId: payload.messageId })
+    } catch (error) {
+      this.logger.error('Failed to delete message', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete message'
       client.emit('error', { message: errorMessage })
     }
   }
