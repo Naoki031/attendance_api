@@ -8,7 +8,7 @@ export class CreateMeetingInvitesTable1776200000001 implements MigrationInterfac
         meeting_id  INT          NOT NULL,
         user_id     INT          NOT NULL,
         invited_by  INT          NOT NULL,
-        status      ENUM('pending','accepted','declined','maybe','missed') NOT NULL DEFAULT 'pending',
+        status      ENUM('pending','accepted','declined','missed') NOT NULL DEFAULT 'pending',
         created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),

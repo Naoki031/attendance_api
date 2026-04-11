@@ -6,11 +6,17 @@ import { MeetingHostSchedule } from './entities/meeting_host_schedule.entity'
 import { MeetingPin } from './entities/meeting_pin.entity'
 import { MeetingCompany } from './entities/meeting_company.entity'
 import { MeetingInvite } from './entities/meeting_invite.entity'
+import { MeetingScheduledParticipant } from './entities/meeting_scheduled_participant.entity'
+import { MeetingAutoCallConfig } from './entities/meeting_auto_call_config.entity'
+import { EmployeeRequest } from '@/modules/employee_requests/entities/employee_request.entity'
 import { MeetingsService } from './meetings.service'
 import { MeetingsController } from './meetings.controller'
 import { MeetingsGateway } from './meetings.gateway'
 import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 import { MeetingHostSchedulesController } from './meeting_host_schedules.controller'
+import { MeetingScheduledParticipantsService } from './meeting-scheduled-participants.service'
+import { MeetingScheduledParticipantsController } from './meeting-scheduled-participants.controller'
+import { MeetingAutoCallCronService } from './meeting-auto-call-cron.service'
 import { TtsService } from './tts.service'
 import { SpeechService } from './speech.service'
 import { TranslateModule } from '@/modules/translate/translate.module'
@@ -30,6 +36,9 @@ import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/use
       MeetingPin,
       MeetingCompany,
       MeetingInvite,
+      MeetingScheduledParticipant,
+      MeetingAutoCallConfig,
+      EmployeeRequest,
     ]),
     TranslateModule,
     SlackChannelsModule,
@@ -39,13 +48,19 @@ import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/use
     AuthModule,
     UserGroupPermissionsModule,
   ],
-  controllers: [MeetingsController, MeetingHostSchedulesController],
+  controllers: [
+    MeetingsController,
+    MeetingHostSchedulesController,
+    MeetingScheduledParticipantsController,
+  ],
   providers: [
     MeetingsService,
     MeetingHostSchedulesService,
     MeetingsGateway,
     TtsService,
     SpeechService,
+    MeetingScheduledParticipantsService,
+    MeetingAutoCallCronService,
   ],
   exports: [MeetingsService, MeetingHostSchedulesService, MeetingsGateway],
 })

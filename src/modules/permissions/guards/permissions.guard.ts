@@ -1,10 +1,18 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common'
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { UserGroupPermissionsService } from '@/modules/user_group_permissions/user_group_permissions.service'
 import { PERMISSIONS_KEY } from '@/modules/permissions/decorators/permissions.decorator'
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
+  private readonly logger = new Logger(PermissionsGuard.name)
+
   constructor(
     private reflector: Reflector,
     private readonly userGroupPermissionsService: UserGroupPermissionsService,
@@ -36,6 +44,13 @@ export class PermissionsGuard implements CanActivate {
       requiredPermissions.some((permission) => permissionKeys.includes(permission))
 
     if (!hasPermission) {
+      const method = request.method as string
+      const url = request.url as string
+      this.logger.warn(
+        `[403] userId=${user.id} lacks permission for ${method} ${url} — ` +
+          `required: [${requiredPermissions.join(', ')}], ` +
+          `granted: [${permissionKeys.join(', ') || 'none'}]`,
+      )
       throw new ForbiddenException('You do not have permission')
     }
 

@@ -357,6 +357,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Notify list page of updated live participants (covers 2nd, 3rd... joins)
     this.emitParticipantsUpdated(payload.meetingId)
 
+    // Cancel any pending invite/auto-call timeouts for this user in this meeting.
+    // Covers the race condition where: auto-call fires → user joins room directly
+    // before the 30s window expires → timer would otherwise fire a missed_call
+    // even though the user is already present.
+    this.cancelUserInviteTimeouts(payload.meetingId, userId)
+
     this.logger.log(`User ${userId} joined meeting ${payload.meetingId}`)
   }
 
@@ -630,9 +636,6 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!audioBuffer) return
 
     const speakerLanguage = payload.speakerLanguage ?? undefined
-    this.logger.debug(
-      `[audio_stream] user=${participant.userId} lang=${speakerLanguage ?? 'auto'} bytes=${audioBuffer.length}`,
-    )
     const ttsEnabled = payload.ttsEnabled ?? false
     const isScreenAudio = payload.isScreenAudio ?? false
 
@@ -671,9 +674,6 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     ;(async () => {
       try {
-        this.logger.debug(
-          `[audio] user=${participant.userId} meetingId=${meetingId} bytes=${audioBuffer.length}`,
-        )
         const { text, language } = await this.speechService.transcribeOnly(
           audioBuffer,
           speakerLanguage,
@@ -689,12 +689,8 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         const hasCJK = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text)
         const tooShort = hasCJK ? text.trim().length < 3 : text.trim().split(/\s+/).length < 2
 
-        if (!text || tooShort) {
-          this.logger.debug(`[subtitle] skipped — too short or empty`)
-        } else if (isWhisperHallucination(text)) {
-          this.logger.debug(
-            `[subtitle] skipped — hallucination detected: "${text.substring(0, 50)}"`,
-          )
+        if (!text || tooShort || isWhisperHallucination(text)) {
+          // Skip silently — too short, empty, or Whisper hallucination
         } else {
           this.logger.log(`[subtitle_partial] emitting to meeting_${meetingId}`)
           this.server.to(`meeting_${meetingId}`).emit('subtitle_partial', {
@@ -977,10 +973,50 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   /**
+   * Cancels ALL pending invite/auto-call timeouts for a user in a specific meeting.
+   * Called when the user joins the meeting room — prevents stale missed_call events
+   * from auto-call synthetic invite IDs that can never be cancelled via cancelInviteTimeout.
+   */
+  private cancelUserInviteTimeouts(meetingId: number, userId: number) {
+    for (const [inviteId, entry] of this.inviteTimeouts.entries()) {
+      if (entry.meetingId === meetingId && entry.userId === userId) {
+        clearTimeout(entry.timer)
+        this.inviteTimeouts.delete(inviteId)
+      }
+    }
+  }
+
+  /**
    * Notifies the invitee that the host cancelled their invite — dismiss call modal on client.
    */
   emitInviteCancelled(userId: number, meetingUuid: string) {
     this.server.to(`user_${userId}`).emit('invite_cancelled', { meetingUuid })
+  }
+
+  /**
+   * Pushes a new scheduled participant invite to the invitee in real time.
+   * The client adds it to the RSVP dialog without requiring a page refresh.
+   */
+  emitScheduledInvite(userId: number, invite: Record<string, unknown>) {
+    this.server.to(`user_${userId}`).emit('scheduled_invite', invite)
+  }
+
+  /**
+   * Notifies the invitee that the host removed their scheduled invite — dismiss RSVP dialog.
+   */
+  emitScheduledInviteRemoved(userId: number, meetingUuid: string) {
+    this.server.to(`user_${userId}`).emit('scheduled_invite_removed', { meetingUuid })
+  }
+
+  /**
+   * Notifies the meeting host that an invitee responded to a scheduled invite.
+   * The host's manage-participants dialog updates the status in real time.
+   */
+  emitScheduledRsvpUpdated(
+    hostId: number,
+    data: { meetingUuid: string; userId: number; status: string },
+  ) {
+    this.server.to(`user_${hostId}`).emit('scheduled_rsvp_updated', data)
   }
 
   /**

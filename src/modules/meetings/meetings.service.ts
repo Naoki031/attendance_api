@@ -82,7 +82,13 @@ export class MeetingsService {
 
     await this.syncMeetingCompanies(saved.id, companyIds)
 
-    return Object.assign(saved, { plain_password: plainPassword }) as Meeting & {
+    // Reload with meeting_companies so the client list can pre-fill the edit form
+    const withCompanies = await this.meetingRepository.findOne({
+      where: { id: saved.id },
+      relations: ['meeting_companies'],
+    })
+
+    return Object.assign(withCompanies ?? saved, { plain_password: plainPassword }) as Meeting & {
       plain_password?: string
     }
   }
@@ -276,7 +282,13 @@ export class MeetingsService {
       await this.syncMeetingCompanies(meeting.id, dto.company_ids)
     }
 
-    return saved
+    // Reload with meeting_companies so the client list can pre-fill the edit form
+    const withCompanies = await this.meetingRepository.findOne({
+      where: { id: saved.id },
+      relations: ['meeting_companies'],
+    })
+
+    return withCompanies ?? saved
   }
 
   /**
@@ -547,12 +559,22 @@ export class MeetingsService {
    */
   async rsvp(meetingUuid: string, userId: number, dto: RsvpDto): Promise<MeetingInvite> {
     const meeting = await this.findByUuid(meetingUuid)
-    const invite = await this.inviteRepository.findOne({
+    let invite = await this.inviteRepository.findOne({
       where: { meeting_id: meeting.id, user_id: userId },
     })
 
     if (!invite) {
-      throw new NotFoundException('Invite not found')
+      // Invite was cancelled or deleted (e.g., host cancelled while invitee was offline).
+      // Re-create so the user can still respond and join.
+      invite = await this.inviteRepository.save(
+        this.inviteRepository.create({
+          meeting_id: meeting.id,
+          user_id: userId,
+          invited_by: meeting.host_id,
+          status: dto.status as MeetingInviteStatus,
+        }),
+      )
+      return invite
     }
 
     await this.inviteRepository.update(
