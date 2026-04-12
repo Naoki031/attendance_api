@@ -22,4 +22,8 @@ export class UpsertAutoCallConfigDto {
   @IsOptional()
   @IsBoolean()
   is_enabled?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  skip_weekends?: boolean
 }

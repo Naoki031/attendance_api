@@ -309,6 +309,7 @@ export class MeetingScheduledParticipantsService {
     this.assertHost(meeting, callerId, roles)
 
     let config = await this.autoCallConfigRepository.findOne({ where: { meeting_id: meeting.id } })
+
     if (!config) {
       config = this.autoCallConfigRepository.create({ meeting_id: meeting.id })
     }
@@ -318,8 +319,25 @@ export class MeetingScheduledParticipantsService {
     if (dto.retry_interval_minutes !== undefined)
       config.retry_interval_minutes = dto.retry_interval_minutes
     if (dto.is_enabled !== undefined) config.is_enabled = dto.is_enabled
+    if (dto.skip_weekends !== undefined) config.skip_weekends = dto.skip_weekends
 
-    return this.autoCallConfigRepository.save(config)
+    const saved = await this.autoCallConfigRepository.save(config)
+
+    // Notify all scheduled participants in real time so their manage-participants
+    // dialog reflects the latest config without a page reload
+    const participants = await this.scheduledParticipantRepository.find({
+      where: { meeting_id: meeting.id },
+      select: ['user_id'],
+    })
+
+    for (const participant of participants) {
+      this.meetingsGateway.emitAutoCallConfigUpdated(participant.user_id, {
+        meetingUuid,
+        config: saved,
+      })
+    }
+
+    return saved
   }
 
   /**
@@ -378,7 +396,11 @@ export class MeetingScheduledParticipantsService {
    *
    * Returns null if the meeting cannot produce a valid start time.
    */
-  private computeMeetingStartAt(meeting: Meeting, timezone: string): moment.Moment | null {
+  private computeMeetingStartAt(
+    meeting: Meeting,
+    timezone: string,
+    skipWeekends = false,
+  ): moment.Moment | null {
     if (!meeting) return null
 
     if (meeting.scheduled_at) {
@@ -388,6 +410,10 @@ export class MeetingScheduledParticipantsService {
     if (!meeting.schedule_time) return null
 
     const nowInZone = moment.tz(timezone)
+    const dayOfWeek = nowInZone.day() // 0 = Sunday, 6 = Saturday
+
+    // Skip Saturday and Sunday for daily/weekly meetings when configured
+    if (skipWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) return null
 
     if (meeting.meeting_type === 'weekly') {
       if (meeting.schedule_day_of_week === null || meeting.schedule_day_of_week === undefined) {
@@ -408,8 +434,9 @@ export class MeetingScheduledParticipantsService {
     meeting: Meeting,
     minutesBefore: number,
     timezone: string,
+    skipWeekends = false,
   ): moment.Moment | null {
-    const startAt = this.computeMeetingStartAt(meeting, timezone)
+    const startAt = this.computeMeetingStartAt(meeting, timezone, skipWeekends)
     if (!startAt) return null
     return startAt.clone().subtract(minutesBefore, 'minutes')
   }
@@ -426,8 +453,11 @@ export class MeetingScheduledParticipantsService {
     }>
   > {
     const now = moment()
-    const windowStart = now.clone().add(55, 'seconds')
-    const windowEnd = now.clone().add(65, 'seconds')
+    // Window centered on now: catches triggers within ±30 seconds of cron fire time.
+    // The 60-second cron period + 60-second window guarantees exactly one match per trigger,
+    // and tolerates up to 30 seconds of Node.js event loop delay.
+    const windowStart = now.clone().subtract(30, 'seconds')
+    const windowEnd = now.clone().add(30, 'seconds')
 
     // Load all enabled configs
     const configs = await this.autoCallConfigRepository.find({
@@ -448,7 +478,12 @@ export class MeetingScheduledParticipantsService {
     for (const config of configs) {
       const meeting = config.meeting
       const timezone = timezoneMap.get(meeting.host_id) ?? 'Asia/Ho_Chi_Minh'
-      const triggerAt = this.computeTriggerAt(meeting, config.minutes_before, timezone)
+      const triggerAt = this.computeTriggerAt(
+        meeting,
+        config.minutes_before,
+        timezone,
+        config.skip_weekends,
+      )
       if (!triggerAt) continue
       if (!triggerAt.isBetween(windowStart, windowEnd, undefined, '[)')) continue
 
@@ -494,8 +529,8 @@ export class MeetingScheduledParticipantsService {
     }>
   > {
     const now = moment()
-    const windowStart = now.clone().add(55, 'seconds')
-    const windowEnd = now.clone().add(65, 'seconds')
+    const windowStart = now.clone().subtract(30, 'seconds')
+    const windowEnd = now.clone().add(30, 'seconds')
 
     const configs = await this.autoCallConfigRepository.find({
       where: { is_enabled: true },
@@ -517,7 +552,12 @@ export class MeetingScheduledParticipantsService {
       if (config.retry_count === 0) continue
       const meeting = config.meeting
       const timezone = retryTimezoneMap.get(meeting.host_id) ?? 'Asia/Ho_Chi_Minh'
-      const baseTriggerAt = this.computeTriggerAt(meeting, config.minutes_before, timezone)
+      const baseTriggerAt = this.computeTriggerAt(
+        meeting,
+        config.minutes_before,
+        timezone,
+        config.skip_weekends,
+      )
       if (!baseTriggerAt) continue
 
       for (let attempt = 1; attempt <= config.retry_count; attempt++) {

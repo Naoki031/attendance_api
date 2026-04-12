@@ -36,6 +36,10 @@ export class MeetingAutoCallConfig {
   @Column({ name: 'is_enabled', type: 'boolean', default: true })
   is_enabled!: boolean
 
+  /** Skip auto-call on Saturday (day 6) and Sunday (day 0) for daily/weekly meetings */
+  @Column({ name: 'skip_weekends', type: 'boolean', default: false })
+  skip_weekends!: boolean
+
   @CreateDateColumn({ name: 'created_at' })
   created_at!: Date
 

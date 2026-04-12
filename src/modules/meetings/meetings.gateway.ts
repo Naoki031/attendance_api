@@ -1037,6 +1037,15 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to('meetings_list').emit('invite_result', payload)
   }
 
+  /**
+   * Notifies a user that the auto-call config for a meeting was updated.
+   * Sent to every scheduled participant so the manage-participants dialog
+   * reflects the latest settings without a page reload.
+   */
+  emitAutoCallConfigUpdated(userId: number, data: { meetingUuid: string; config: unknown }) {
+    this.server.to(`user_${userId}`).emit('auto_call_config_updated', data)
+  }
+
   /** Returns the user IDs of participants currently connected to the meeting room. */
   getActiveUserIds(meetingId: number): Set<number> {
     const participants = this.activeParticipants.get(meetingId)
