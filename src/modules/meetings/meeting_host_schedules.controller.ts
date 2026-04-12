@@ -14,6 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
+import { MeetingsGateway } from './meetings.gateway'
 import { CreateHostScheduleDto } from './dto/create-host-schedule.dto'
 import { UpdateHostScheduleDto } from './dto/update-host-schedule.dto'
 import { ExcludeDateDto } from './dto/exclude-date.dto'
@@ -28,7 +29,10 @@ import { Permissions } from '@/modules/permissions/decorators/permissions.decora
 @Controller('meetings/:uuid/host-schedules')
 @UseGuards(PermissionsGuard)
 export class MeetingHostSchedulesController {
-  constructor(private readonly hostSchedulesService: MeetingHostSchedulesService) {}
+  constructor(
+    private readonly hostSchedulesService: MeetingHostSchedulesService,
+    private readonly meetingsGateway: MeetingsGateway,
+  ) {}
 
   @Get()
   @Permissions('all_privileges', 'read')
@@ -46,83 +50,91 @@ export class MeetingHostSchedulesController {
 
   @Post()
   @Permissions('all_privileges', 'create')
-  create(
+  async create(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: CreateHostScheduleDto,
   ) {
-    return this.hostSchedulesService.create(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    const result = await this.hostSchedulesService.create(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    this.meetingsGateway.emitHostScheduleChanged(uuid)
+    return result
   }
 
   @Patch(':id')
   @Permissions('all_privileges', 'update')
-  update(
+  async update(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: UpdateHostScheduleDto,
   ) {
-    return this.hostSchedulesService.update(id, uuid, user.id, dto, isPrivilegedUser(user.roles))
+    const result = await this.hostSchedulesService.update(id, uuid, user.id, dto, isPrivilegedUser(user.roles))
+    this.meetingsGateway.emitHostScheduleChanged(uuid)
+    return result
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('all_privileges', 'delete')
-  remove(
+  async remove(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
     @UserDecorator() user: User,
   ) {
-    return this.hostSchedulesService.remove(id, uuid, user.id, isPrivilegedUser(user.roles))
+    await this.hostSchedulesService.remove(id, uuid, user.id, isPrivilegedUser(user.roles))
+    this.meetingsGateway.emitHostScheduleChanged(uuid)
   }
 
   /** Removes a single date from a schedule (adds to excluded_dates or deletes if one_time). */
   @Patch(':id/exclude-date')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('all_privileges', 'update')
-  excludeDate(
+  async excludeDate(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: ExcludeDateDto,
   ) {
-    return this.hostSchedulesService.excludeDate(
+    await this.hostSchedulesService.excludeDate(
       id,
       uuid,
       user.id,
       dto.date,
       isPrivilegedUser(user.roles),
     )
+    this.meetingsGateway.emitHostScheduleChanged(uuid)
   }
 
   /** Truncates a schedule: removes the given date and all dates after it. */
   @Patch(':id/truncate')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('all_privileges', 'update')
-  truncate(
+  async truncate(
     @Param('uuid') uuid: string,
     @Param('id', ParseIntPipe) id: number,
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: TruncateScheduleDto,
   ) {
-    return this.hostSchedulesService.truncateFromDate(
+    await this.hostSchedulesService.truncateFromDate(
       id,
       uuid,
       user.id,
       dto.date,
       isPrivilegedUser(user.roles),
     )
+    this.meetingsGateway.emitHostScheduleChanged(uuid)
   }
 
   /** Swaps the hosts of two dates across all schedules of the meeting. */
   @Post('swap-dates')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('all_privileges', 'update')
-  swapDates(
+  async swapDates(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: SwapDatesDto,
   ) {
-    return this.hostSchedulesService.swapDates(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    await this.hostSchedulesService.swapDates(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    this.meetingsGateway.emitHostScheduleChanged(uuid)
   }
 }

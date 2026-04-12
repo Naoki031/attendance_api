@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common'
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, In } from 'typeorm'
 import { v4 as uuidv4 } from 'uuid'
@@ -12,6 +18,7 @@ import {
   EmployeeRequestType,
 } from '@/modules/employee_requests/entities/employee_request.entity'
 import { MeetingAutoCallConfig } from './entities/meeting_auto_call_config.entity'
+import { MeetingInvite, MeetingInviteStatus } from './entities/meeting_invite.entity'
 import { Meeting } from './entities/meeting.entity'
 import { CreateScheduledParticipantsDto } from './dto/create-scheduled-participants.dto'
 import { RsvpScheduledParticipantDto } from './dto/rsvp-scheduled-participant.dto'
@@ -35,6 +42,8 @@ export class MeetingScheduledParticipantsService {
     private readonly meetingRepository: Repository<Meeting>,
     @InjectRepository(EmployeeRequest)
     private readonly employeeRequestRepository: Repository<EmployeeRequest>,
+    @InjectRepository(MeetingInvite)
+    private readonly inviteRepository: Repository<MeetingInvite>,
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
     private readonly meetingsGateway: MeetingsGateway,
@@ -321,6 +330,18 @@ export class MeetingScheduledParticipantsService {
     if (dto.is_enabled !== undefined) config.is_enabled = dto.is_enabled
     if (dto.skip_weekends !== undefined) config.skip_weekends = dto.skip_weekends
 
+    // Validate: all retries must complete before the meeting starts.
+    // Last retry fires at triggerAt + retryCount × retryInterval; triggerAt = meetingStart − minutesBefore.
+    // So retryCount × retryInterval must be strictly less than minutesBefore.
+    if (
+      config.retry_count > 0 &&
+      config.retry_count * config.retry_interval_minutes > config.minutes_before
+    ) {
+      throw new BadRequestException(
+        `Retry window (${config.retry_count} × ${config.retry_interval_minutes} min = ${config.retry_count * config.retry_interval_minutes} min) must be less than minutes_before (${config.minutes_before} min)`,
+      )
+    }
+
     const saved = await this.autoCallConfigRepository.save(config)
 
     // Notify all scheduled participants in real time so their manage-participants
@@ -364,6 +385,25 @@ export class MeetingScheduledParticipantsService {
   }
 
   /**
+   * Returns user IDs that explicitly declined the auto-call for this meeting session.
+   * Only invites declined on or after sessionStart are counted — this prevents a decline
+   * from a previous daily/weekly session from blocking the next day's call.
+   */
+  private async getDeclinedUserIds(
+    meetingId: number,
+    sessionStart: moment.Moment,
+  ): Promise<Set<number>> {
+    const rows = await this.inviteRepository
+      .createQueryBuilder('invite')
+      .select('invite.user_id', 'user_id')
+      .where('invite.meeting_id = :meetingId', { meetingId })
+      .andWhere('invite.status = :status', { status: MeetingInviteStatus.DECLINED })
+      .andWhere('invite.updated_at >= :sessionStart', { sessionStart: sessionStart.toDate() })
+      .getRawMany<{ user_id: number }>()
+    return new Set(rows.map((row) => row.user_id))
+  }
+
+  /**
    * Returns the set of user IDs that have an approved or pending OFF leave request
    * covering meetingTime — checked in a single batch query.
    */
@@ -378,9 +418,7 @@ export class MeetingScheduledParticipantsService {
       .select('request.user_id', 'user_id')
       .where('request.user_id IN (:...userIds)', { userIds })
       .andWhere('request.type = :type', { type: EmployeeRequestType.OFF })
-      .andWhere('request.status IN (:...statuses)', {
-        statuses: [EmployeeRequestStatus.APPROVED, EmployeeRequestStatus.PENDING],
-      })
+      .andWhere('request.status = :status', { status: EmployeeRequestStatus.APPROVED })
       .andWhere('request.from_datetime <= :meetingTime', { meetingTime: meetingDate })
       .andWhere('request.to_datetime >= :meetingTime', { meetingTime: meetingDate })
       .getRawMany<{ user_id: number }>()
@@ -572,6 +610,9 @@ export class MeetingScheduledParticipantsService {
         })
         if (accepted.length === 0) continue
 
+        // Skip users who explicitly declined during this call session
+        const declinedSet = await this.getDeclinedUserIds(meeting.id, baseTriggerAt)
+
         const meetingStartAt = this.computeMeetingStartAt(meeting, timezone)
 
         let participants: MeetingScheduledParticipant[]
@@ -580,9 +621,12 @@ export class MeetingScheduledParticipantsService {
             accepted.map((participant) => participant.user_id),
             meetingStartAt,
           )
-          participants = accepted.filter((participant) => !onLeaveSet.has(participant.user_id))
+          participants = accepted.filter(
+            (participant) =>
+              !declinedSet.has(participant.user_id) && !onLeaveSet.has(participant.user_id),
+          )
         } else {
-          participants = accepted
+          participants = accepted.filter((participant) => !declinedSet.has(participant.user_id))
         }
 
         if (participants.length > 0) {

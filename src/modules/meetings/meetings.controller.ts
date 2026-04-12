@@ -26,6 +26,7 @@ import { ProcessSpeechDto } from './dto/process-speech.dto'
 import { CreateInvitesDto } from './dto/create-invites.dto'
 import { RsvpDto } from './dto/rsvp.dto'
 import { ChatRoomService } from '@/modules/chat/chat-room.service'
+import { UsersService } from '@/modules/users/users.service'
 import { User as UserDecorator } from '@/modules/auth/decorators/user.decorator'
 import type { User } from '@/modules/users/entities/user.entity'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
@@ -41,12 +42,17 @@ export class MeetingsController {
     private readonly meetingsGateway: MeetingsGateway,
     private readonly speechService: SpeechService,
     private readonly chatRoomService: ChatRoomService,
+    private readonly usersService: UsersService,
   ) {}
 
   @Post()
   @Permissions('all_privileges', 'create')
-  create(@UserDecorator() user: User, @Body(ValidationPipe) dto: CreateMeetingDto) {
-    return this.meetingsService.create(user.id, dto)
+  async create(@UserDecorator() user: User, @Body(ValidationPipe) dto: CreateMeetingDto) {
+    const created = await this.meetingsService.create(user.id, dto)
+    // Fetch full meeting (with relations) to broadcast — creation response keeps plain_password
+    const full = await this.meetingsService.findByUuid(created.uuid)
+    this.meetingsGateway.emitMeetingCreated(full as unknown as Record<string, unknown>)
+    return created
   }
 
   @Get()
@@ -83,12 +89,14 @@ export class MeetingsController {
 
   @Patch(':uuid')
   @Permissions('all_privileges', 'update')
-  update(
+  async update(
     @Param('uuid') uuid: string,
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: UpdateMeetingDto,
   ) {
-    return this.meetingsService.update(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    const updated = await this.meetingsService.update(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    this.meetingsGateway.emitMeetingUpdated(updated as unknown as Record<string, unknown>)
+    return updated
   }
 
   @Delete(':uuid')
@@ -235,13 +243,15 @@ export class MeetingsController {
     // Cancel the gateway timeout — user responded before the 30s window expired
     this.meetingsGateway.cancelInviteTimeout(invite.id)
 
-    // Broadcast result to all participants currently in the meeting room
+    // Broadcast result to all participants currently in the meeting room.
+    // Fetch full_name from DB because JWT payload may not contain it (old tokens).
     if (dto.status === 'accepted' || dto.status === 'declined') {
+      const fullUser = await this.usersService.findOne(user.id)
       this.meetingsGateway.emitInviteResult(
         invite.meeting_id,
         uuid,
         user.id,
-        user.full_name,
+        fullUser.full_name,
         dto.status,
       )
     }

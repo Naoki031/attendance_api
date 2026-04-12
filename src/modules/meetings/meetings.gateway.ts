@@ -1062,4 +1062,25 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       activeUserIds,
     })
   }
+
+  /**
+   * Broadcasts a newly created meeting to all users on the meetings list page.
+   */
+  emitMeetingCreated(meeting: Record<string, unknown>) {
+    this.server.to('meetings_list').emit('meeting_created', meeting)
+  }
+
+  /**
+   * Broadcasts an updated meeting to all users on the meetings list page.
+   */
+  emitMeetingUpdated(meeting: Record<string, unknown>) {
+    this.server.to('meetings_list').emit('meeting_updated', meeting)
+  }
+
+  /**
+   * Notifies all users on the meetings list page that the host schedule for a meeting changed.
+   */
+  emitHostScheduleChanged(meetingUuid: string) {
+    this.server.to('meetings_list').emit('host_schedule_changed', { meetingUuid })
+  }
 }
