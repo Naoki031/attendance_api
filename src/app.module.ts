@@ -32,6 +32,7 @@ import { FaceModule } from './modules/face/face.module'
 import { FeaturesModule } from './modules/features/features.module'
 import { MeetingsModule } from './modules/meetings/meetings.module'
 import { MailModule } from './modules/mail/mail.module'
+import { RoomSectionsModule } from './modules/room-sections/room-sections.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
@@ -72,6 +73,7 @@ import { LastSeenInterceptor } from '@/modules/users/interceptors/last-seen.inte
     FeaturesModule,
     MeetingsModule,
     MailModule,
+    RoomSectionsModule,
   ],
   providers: [
     {

@@ -94,7 +94,12 @@ export class MeetingsController {
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: UpdateMeetingDto,
   ) {
-    const updated = await this.meetingsService.update(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    const updated = await this.meetingsService.update(
+      uuid,
+      user.id,
+      dto,
+      isPrivilegedUser(user.roles),
+    )
     this.meetingsGateway.emitMeetingUpdated(updated as unknown as Record<string, unknown>)
     return updated
   }

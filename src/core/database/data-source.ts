@@ -22,6 +22,7 @@ import { Group } from '../../modules/groups/entities/group.entity'
 import { UserGroup } from '../../modules/groups/entities/user_group.entity'
 import { BugReport } from '../../modules/bug_reports/entities/bug_report.entity'
 import { TranslationCache } from '../../modules/translate/entities/translation_cache.entity'
+import { TranslationLog } from '../../modules/translate/entities/translation_log.entity'
 import { Message } from '../../modules/messages/entities/message.entity'
 import { ChatRoom } from '../../modules/chat/entities/chat-room.entity'
 import { ChatRoomMember } from '../../modules/chat/entities/chat-room-member.entity'
@@ -35,6 +36,8 @@ import { MeetingCompany } from '../../modules/meetings/entities/meeting_company.
 import { MeetingInvite } from '../../modules/meetings/entities/meeting_invite.entity'
 import { MeetingScheduledParticipant } from '../../modules/meetings/entities/meeting_scheduled_participant.entity'
 import { MeetingAutoCallConfig } from '../../modules/meetings/entities/meeting_auto_call_config.entity'
+import { RoomSection } from '../../modules/room-sections/entities/room-section.entity'
+import { RoomSectionItem } from '../../modules/room-sections/entities/room-section-item.entity'
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
@@ -62,6 +65,7 @@ const options: DataSourceOptions & SeederOptions = {
     UserGroup,
     BugReport,
     TranslationCache,
+    TranslationLog,
     Message,
     ChatRoom,
     ChatRoomMember,
@@ -75,6 +79,8 @@ const options: DataSourceOptions & SeederOptions = {
     MeetingInvite,
     MeetingScheduledParticipant,
     MeetingAutoCallConfig,
+    RoomSection,
+    RoomSectionItem,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',

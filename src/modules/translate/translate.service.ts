@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import Anthropic from '@anthropic-ai/sdk'
+import moment from 'moment'
 import { TranslationCache } from './entities/translation_cache.entity'
+import { TranslationLogService } from './translation-log.service'
 
 // IT/dev terms that must stay as-is. Exclude common English words (request, session, token)
 // that have natural translations in conversational context.
@@ -198,79 +200,108 @@ function applyJapaneseStyleRules(text: string, intent: MessageIntent): string {
 }
 
 /**
- * Builds the shared translation system prompt for both batch and single-language calls.
- * Keeping it in one place avoids duplicating ~450 chars of prompt on every API call.
+ * Static translation rules that never change between calls.
+ * Cached by Anthropic prompt caching — reused across ALL translation requests
+ * regardless of source/target language or glossary.
  */
-function buildTranslationSystemPrompt(
+const STATIC_TRANSLATION_RULES = [
+  `- PRIORITY: Translate NATURALLY, not literally. Rewrite to sound like a native speaker.`,
+  `- Avoid word-for-word translation. You may restructure the sentence completely.`,
+  `- NATURALIZATION RULE: If the output sounds like a translation, rewrite it until it reads as if a native speaker wrote it from scratch. Full sentence restructuring is allowed and encouraged.`,
+  `- Tone: casual→warm/friendly, formal→professional. Never make casual stiff.`,
+  `- VI casual: use "bạn/mình", not "tôi".`,
+  `- JA HARD RULES (STRICT):`,
+  `  • NEVER output "あなた" or "君" under ANY circumstance — Vietnamese "bạn/em/anh/chị" and English "you" MUST be rendered by omitting the subject entirely, not by translating to あなた/君`,
+  `      BAD: あなたはこのテーブルのことを言っていますか？`,
+  `      GOOD: このテーブルのことですか？`,
+  `  • NEVER use masculine first-person "僕" or "俺" — omit subject or use "私" only if required`,
+  `  • NEVER use kinship terms (姉さん/お兄さん etc.) for workplace address — omit or use person's name`,
+  `  • Casual source → casual Japanese output. NEVER use formal vocabulary in casual chat:`,
+  `      BAD: 非常に難しいです / 言及していますか / その通りです`,
+  `      GOOD: かなり難しいですね / そのことですか？ / そうですよ`,
+  `  • Prefer natural Japanese over literal translation`,
+  `  • Merge clauses with て/から/し instead of writing two short sentences`,
+  `  • Use soft outward tone (〜くださいね / 〜といいですね / 〜ほしいです)`,
+  `  • Replace unnatural phrases:`,
+  `      - 大切にしてください → お体に気をつけてください`,
+  `      - 支援が必要な時は / 助けが必要 → 困ったことがあれば`,
+  `      - サポートが必要なら → 気軽に声をかけてください`,
+  `      - 疲れているように見える → なんか疲れてそう / お疲れじゃない？`,
+  `      - 早く元気になってほしい / もらいたい → 早く良くなるといいね`,
+  `      - すごく心配している (casual) → 大丈夫？ + 気になってたんだけど`,
+  `- JA STYLE UPGRADE (caring tone only):`,
+  `  • You MAY add natural nuance: 気軽に / といいですね / どうか`,
+  `  • NEVER use もらいたいです for recovery or health wishes — it frames the speaker's desire, not the other person's wellbeing`,
+  `  • NEVER use ぜひ with negative requests (〜ないでね / 〜ないでください) — ぜひ is for positive requests only`,
+  `  • Add nuance only where it flows naturally — do NOT overuse`,
+  `- BAD example (DO NOT DO):`,
+  `  • あなたもお体に気をつけてください`,
+  `  • 疲れているように見えるよ。ゆっくり休んでね。 (literal + segmented)`,
+  `  • 早く元気になってもらいたいです。 (speaker-centric framing)`,
+  `- GOOD example:`,
+  `  • ちょっとお疲れみたいだし、無理せずゆっくり休んでね。`,
+  `  • 困ったことがあれば気軽に声をかけてね。早く良くなるといいね🙏`,
+  `- Avoid unnatural Japanese:`,
+  `  • 大切にしてください (for health context)`,
+  `  • 疲れているように見える (for "you look tired" context)`,
+  `  • もらいたいです for recovery/health wishing`,
+  `- JA fixed phrases: よろしくお願いします="Thanks in advance"; かしこまりました="Certainly"; お疲れ様です="Good work"`,
+  `- Keep as-is: ${IT_TERMS_PRESERVED}; ${ATTENDANCE_TERMS_PRESERVED}`,
+  `- Profanity → replace with [***], do not translate vulgarity`,
+  `- Keep ALL emojis exactly as-is — do NOT remove, replace, or convert them:`,
+  `  • Unicode emoji (🙏😅🎉) → keep exactly`,
+  `  • Custom emoji codes (:blob-sob: :yoyo-haha: :any-word:) → keep EXACTLY including the colons — NEVER convert to Unicode`,
+  `- Script purity: output language must use ONLY that script — never mix scripts (e.g., no Japanese/Chinese characters inside Vietnamese or English output). If a term cannot be translated, use the closest equivalent or romanize it — NEVER keep original script characters.`,
+  `- Keep markdown: @mentions, links, code`,
+  `- Do NOT translate proper nouns, URLs, ticket IDs`,
+  `- Translate ONLY what is in the source — do NOT add phrases, sentences, or emoji not present in the original`,
+  `- FINAL SELF-CHECK (MANDATORY before output):`,
+  `  • Does this sound like a native speaker wrote it?`,
+  `  • Is there any "translated feeling"? → rewrite if yes`,
+  `  • Are short clauses merged into one natural sentence instead of two flat ones?`,
+  `  • Is the emotional weight appropriate? (workplace casual = light, not dramatic)`,
+  `  • Ensure NO "あなた" or "君" exists — if found, rewrite with implicit subject`,
+  `  • If any check fails → rewrite before returning`,
+  `- TRANSLATION QUALITY STANDARDS:`,
+  `  • Accuracy: preserve meaning, intent, and emotional tone exactly`,
+  `  • Fluency: output must read as natural native speech, not a translation`,
+  `  • Consistency: same terms translated the same way throughout the conversation`,
+  `  • Register: match the formality level and social register of the source message`,
+  `  • Completeness: never omit or add content — translate exactly what is present`,
+  `  • Context awareness: use surrounding context to resolve ambiguous words`,
+].join('\n')
+
+/**
+ * Builds the translation system prompt as content blocks for Anthropic prompt caching.
+ * - Block 1: static rules (cached, ~90% of prompt tokens, reused across ALL calls)
+ * - Block 2: dynamic context per request (source/target language, glossary, output format)
+ */
+function buildTranslationSystemBlocks(
   sourceLang: string,
   targetDescription: string,
   outputInstruction: string,
   glossarySection: string,
-): string {
-  return [
+  cachePrompt: boolean,
+): Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> {
+  const dynamicLines = [
     `Workplace chat translator. Messages mix work and casual conversation. Translate from ${sourceLang} to ${targetDescription}.`,
-    `- PRIORITY: Translate NATURALLY, not literally. Rewrite to sound like a native speaker.`,
-    `- Avoid word-for-word translation. You may restructure the sentence completely.`,
-    `- NATURALIZATION RULE: If the output sounds like a translation, rewrite it until it reads as if a native speaker wrote it from scratch. Full sentence restructuring is allowed and encouraged.`,
-    `- Tone: casual→warm/friendly, formal→professional. Never make casual stiff.`,
-    `- VI casual: use "bạn/mình", not "tôi".`,
-    `- JA HARD RULES (STRICT):`,
-    `  • NEVER output "あなた" or "君" under ANY circumstance — Vietnamese "bạn/em/anh/chị" and English "you" MUST be rendered by omitting the subject entirely, not by translating to あなた/君`,
-    `      BAD: あなたはこのテーブルのことを言っていますか？`,
-    `      GOOD: このテーブルのことですか？`,
-    `  • NEVER use masculine first-person "僕" or "俺" — omit subject or use "私" only if required`,
-    `  • NEVER use kinship terms (姉さん/お兄さん etc.) for workplace address — omit or use person's name`,
-    `  • Casual source → casual Japanese output. NEVER use formal vocabulary in casual chat:`,
-    `      BAD: 非常に難しいです / 言及していますか / その通りです`,
-    `      GOOD: かなり難しいですね / そのことですか？ / そうですよ`,
-    `  • Prefer natural Japanese over literal translation`,
-    `  • Merge clauses with て/から/し instead of writing two short sentences`,
-    `  • Use soft outward tone (〜くださいね / 〜といいですね / 〜ほしいです)`,
-    `  • Replace unnatural phrases:`,
-    `      - 大切にしてください → お体に気をつけてください`,
-    `      - 支援が必要な時は / 助けが必要 → 困ったことがあれば`,
-    `      - サポートが必要なら → 気軽に声をかけてください`,
-    `      - 疲れているように見える → なんか疲れてそう / お疲れじゃない？`,
-    `      - 早く元気になってほしい / もらいたい → 早く良くなるといいね`,
-    `      - すごく心配している (casual) → 大丈夫？ + 気になってたんだけど`,
-    `- JA STYLE UPGRADE (caring tone only):`,
-    `  • You MAY add natural nuance: 気軽に / といいですね / どうか`,
-    `  • NEVER use もらいたいです for recovery or health wishes — it frames the speaker's desire, not the other person's wellbeing`,
-    `  • NEVER use ぜひ with negative requests (〜ないでね / 〜ないでください) — ぜひ is for positive requests only`,
-    `  • Add nuance only where it flows naturally — do NOT overuse`,
-    `- BAD example (DO NOT DO):`,
-    `  • あなたもお体に気をつけてください`,
-    `  • 疲れているように見えるよ。ゆっくり休んでね。 (literal + segmented)`,
-    `  • 早く元気になってもらいたいです。 (speaker-centric framing)`,
-    `- GOOD example:`,
-    `  • ちょっとお疲れみたいだし、無理せずゆっくり休んでね。`,
-    `  • 困ったことがあれば気軽に声をかけてね。早く良くなるといいね🙏`,
-    `- Avoid unnatural Japanese:`,
-    `  • 大切にしてください (for health context)`,
-    `  • 疲れているように見える (for "you look tired" context)`,
-    `  • もらいたいです for recovery/health wishing`,
-    `- JA fixed phrases: よろしくお願いします="Thanks in advance"; かしこまりました="Certainly"; お疲れ様です="Good work"`,
-    `- Keep as-is: ${IT_TERMS_PRESERVED}; ${ATTENDANCE_TERMS_PRESERVED}`,
-    `- Profanity → replace with [***], do not translate vulgarity`,
     glossarySection,
-    `- Keep ALL emojis exactly as-is — do NOT remove, replace, or convert them:`,
-    `  • Unicode emoji (🙏😅🎉) → keep exactly`,
-    `  • Custom emoji codes (:blob-sob: :yoyo-haha: :any-word:) → keep EXACTLY including the colons — NEVER convert to Unicode`,
-    `- Script purity: output language must use ONLY that script — never mix scripts (e.g., no Japanese/Chinese characters inside Vietnamese or English output). If a term cannot be translated, use the closest equivalent or romanize it — NEVER keep original script characters.`,
-    `- Keep markdown: @mentions, links, code`,
-    `- Do NOT translate proper nouns, URLs, ticket IDs`,
-    `- Translate ONLY what is in the source — do NOT add phrases, sentences, or emoji not present in the original`,
-    `- FINAL SELF-CHECK (MANDATORY before output):`,
-    `  • Does this sound like a native speaker wrote it?`,
-    `  • Is there any "translated feeling"? → rewrite if yes`,
-    `  • Are short clauses merged into one natural sentence instead of two flat ones?`,
-    `  • Is the emotional weight appropriate? (workplace casual = light, not dramatic)`,
-    `  • Ensure NO "あなた" or "君" exists — if found, rewrite with implicit subject`,
-    `  • If any check fails → rewrite before returning`,
     `- Return format strictly: ${outputInstruction}`,
   ]
     .filter(Boolean)
     .join('\n')
+
+  return [
+    {
+      type: 'text',
+      text: STATIC_TRANSLATION_RULES,
+      ...(cachePrompt ? { cache_control: { type: 'ephemeral' } } : {}),
+    },
+    {
+      type: 'text',
+      text: dynamicLines,
+    },
+  ]
 }
 
 @Injectable()
@@ -280,11 +311,13 @@ export class TranslateService {
   private model: string = 'claude-haiku-4-5-20251001'
   private maxTokens: number = 8192
   private maxInputLength: number = 5000
+  private cachePrompt: boolean = true
 
   constructor(
     private readonly configService: ConfigService,
     @InjectRepository(TranslationCache)
     private readonly translationCacheRepository: Repository<TranslationCache>,
+    private readonly translationLogService: TranslationLogService,
   ) {
     this.model = this.configService.get<string>('TRANSLATE_MODEL') ?? 'claude-haiku-4-5-20251001'
     this.maxTokens = parseInt(this.configService.get<string>('TRANSLATE_MAX_TOKENS') ?? '8192', 10)
@@ -292,10 +325,11 @@ export class TranslateService {
       this.configService.get<string>('TRANSLATE_MAX_INPUT_LENGTH') ?? '5000',
       10,
     )
+    this.cachePrompt = this.configService.get<string>('TRANSLATE_CACHE_PROMPT') !== 'false'
     const apiKey = this.configService.get<string>('ANTHROPIC_API_KEY')
 
     this.logger.log(
-      `TranslateService init — model=${this.model} maxTokens=${this.maxTokens} maxInputLength=${this.maxInputLength} apiKey=${apiKey ? `set(${apiKey.slice(0, 12)}...)` : 'MISSING'}`,
+      `TranslateService init — model=${this.model} maxTokens=${this.maxTokens} maxInputLength=${this.maxInputLength} cachePrompt=${this.cachePrompt} apiKey=${apiKey ? `set(${apiKey.slice(0, 12)}...)` : 'MISSING'}`,
     )
 
     if (!apiKey) {
@@ -345,6 +379,7 @@ export class TranslateService {
     targetLangs: string[],
     glossaryTerms: string[] = [],
     onChunk?: (lang: string, chunk: string) => void,
+    messageId?: number,
   ): Promise<Record<string, string>> {
     this.logger.log(
       `translateToMultiple — textLen=${text.length} src=${sourceLang} targets=${targetLangs.join(',')} client=${this.client ? 'ok' : 'NULL'}`,
@@ -363,11 +398,12 @@ export class TranslateService {
         ? `- Glossary (translate consistently): ${glossaryTerms.join(', ')}`
         : ''
 
-    const systemPrompt = buildTranslationSystemPrompt(
+    const systemBlocks = buildTranslationSystemBlocks(
       sourceLang,
       `ALL of: ${targetLangs.join(', ')}`,
       `- Return JSON {"lang":"translation",...}. ONLY JSON, no markdown, no explanation.`,
       glossarySection,
+      this.cachePrompt,
     )
 
     // Cap max_tokens dynamically — output is bounded by input size (2 langs ≈ 3× input chars)
@@ -377,9 +413,10 @@ export class TranslateService {
       this.model,
       truncated,
       targetLangs.join(','),
-      systemPrompt,
+      systemBlocks,
       undefined,
       dynamicMaxTokens,
+      { messageId, sourceLang, targetLangs },
     )
 
     if (!result) {
@@ -387,7 +424,14 @@ export class TranslateService {
         'translateToMultiple — batch returned null, falling back to individual calls',
       )
 
-      return this.translateToMultipleFallback(text, sourceLang, targetLangs, glossaryTerms, onChunk)
+      return this.translateToMultipleFallback(
+        text,
+        sourceLang,
+        targetLangs,
+        glossaryTerms,
+        onChunk,
+        messageId,
+      )
     }
 
     try {
@@ -429,6 +473,7 @@ export class TranslateService {
     targetLangs: string[],
     glossaryTerms: string[],
     onChunk?: (lang: string, chunk: string) => void,
+    messageId?: number,
   ): Promise<Record<string, string>> {
     const results = await Promise.all(
       targetLangs.map((lang) =>
@@ -438,6 +483,7 @@ export class TranslateService {
           lang,
           glossaryTerms,
           onChunk ? (chunk) => onChunk(lang, chunk) : undefined,
+          messageId,
         ),
       ),
     )
@@ -460,6 +506,7 @@ export class TranslateService {
     targetLang: string,
     glossaryTerms: string[] = [],
     onChunk?: (chunk: string) => void,
+    messageId?: number,
   ): Promise<string | null> {
     if (!this.client) return null
 
@@ -471,11 +518,12 @@ export class TranslateService {
         ? `- Glossary (translate consistently): ${glossaryTerms.join(', ')}`
         : ''
 
-    const systemPrompt = buildTranslationSystemPrompt(
+    const systemBlocks = buildTranslationSystemBlocks(
       sourceLang,
       targetLang,
       `- Return ONLY the translated text, no explanation, no markdown wrapper, no quotes.`,
       glossarySection,
+      this.cachePrompt,
     )
 
     const dynamicMaxTokens = Math.min(this.maxTokens, Math.ceil(truncated.length * 1.5) + 200)
@@ -488,9 +536,10 @@ export class TranslateService {
       this.model,
       truncated,
       targetLang,
-      systemPrompt,
+      systemBlocks,
       onChunk,
       dynamicMaxTokens,
+      { messageId, sourceLang, targetLangs: [targetLang] },
     )
   }
 
@@ -522,6 +571,7 @@ export class TranslateService {
       missingLangs,
       glossaryTerms,
       onChunk,
+      messageId,
     )
 
     const merged = { ...cachedTranslations, ...newTranslations }
@@ -575,18 +625,20 @@ export class TranslateService {
     model: string,
     text: string,
     targetLang: string,
-    systemPrompt: string,
+    systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>,
     onChunk?: (chunk: string) => void,
     maxTokens?: number,
+    logContext?: { messageId?: number; sourceLang: string; targetLangs: string[] },
   ): Promise<string | null> {
     if (!this.client) return null
 
+    const startTime = moment().valueOf()
     const useStreaming = text.length > 1000
     const maxRetries = 2
     const requestPayload = {
       model,
       max_tokens: maxTokens ?? this.maxTokens,
-      system: systemPrompt,
+      system: systemBlocks,
       messages: [{ role: 'user' as const, content: `<text>${text}</text>` }],
     }
     const isJapaneseTarget = targetLang.includes('ja')
@@ -610,23 +662,48 @@ export class TranslateService {
 
           const finalMessage = await stream.finalMessage()
 
+          this.logCacheUsage(finalMessage.usage)
+
           this.logger.log(
             `translateToSingle done — target=${targetLang} stopReason=${finalMessage.stop_reason} resultLen=${fullText.length}`,
           )
 
           const streamResult = fullText.trim() || null
 
+          this.fireAndForgetSessionLog({
+            logContext,
+            inputLength: text.length,
+            usage: finalMessage.usage,
+            model,
+            startTime,
+            mode: 'stream',
+            error: undefined,
+          })
+
           return streamResult && isJapaneseTarget
             ? applyJapaneseStyleRules(streamResult, intent)
             : streamResult
         } else {
           const response = await this.client.messages.create(requestPayload, { timeout: 60_000 })
+
+          this.logCacheUsage(response.usage)
+
           const block = response.content[0]
           const rawResult = block.type === 'text' ? block.text.trim() : null
 
           this.logger.log(
             `translateToSingle done — target=${targetLang} stopReason=${response.stop_reason} resultLen=${rawResult?.length ?? 0}`,
           )
+
+          this.fireAndForgetSessionLog({
+            logContext,
+            inputLength: text.length,
+            usage: response.usage,
+            model,
+            startTime,
+            mode: 'sync',
+            error: undefined,
+          })
 
           return rawResult && isJapaneseTarget
             ? applyJapaneseStyleRules(rawResult, intent)
@@ -650,11 +727,74 @@ export class TranslateService {
           `translateToSingle failed — target=${targetLang} attempt=${attempt}: ${(error as Error).message}`,
         )
 
+        this.fireAndForgetSessionLog({
+          logContext,
+          inputLength: text.length,
+          usage: undefined,
+          model,
+          startTime,
+          mode: useStreaming ? 'stream' : 'sync',
+          error: (error as Error).message,
+        })
+
         return null
       }
     }
 
     return null
+  }
+
+  /**
+   * Fire-and-forget DB log write — never blocks or throws.
+   */
+  private fireAndForgetSessionLog(parameters: {
+    logContext?: { messageId?: number; sourceLang: string; targetLangs: string[] }
+    inputLength: number
+    usage: Anthropic.Messages.Usage | undefined
+    model: string
+    startTime: number
+    mode: 'sync' | 'stream'
+    error: string | undefined
+  }): void {
+    if (!parameters.logContext) return
+
+    const { logContext, inputLength, usage, model, startTime, mode, error } = parameters
+
+    // Fire-and-forget — do not await
+    this.translationLogService
+      .logTranslation({
+        messageId: logContext.messageId,
+        sourceLang: logContext.sourceLang,
+        targetLangs: logContext.targetLangs,
+        inputLength,
+        status: error ? 'error' : 'success',
+        errorMessage: error,
+        inputTokens: usage?.input_tokens,
+        outputTokens: usage?.output_tokens,
+        cacheCreationTokens: usage?.cache_creation_input_tokens,
+        cacheReadTokens: usage?.cache_read_input_tokens,
+        modelUsed: model,
+        durationMs: moment().valueOf() - startTime,
+        mode,
+      })
+      .catch(() => {
+        /* silently ignore — logged inside logTranslation */
+      })
+  }
+
+  private logCacheUsage(usage: Anthropic.Messages.Usage | undefined): void {
+    if (!usage) return
+
+    const created = usage.cache_creation_input_tokens ?? 0
+    const read = usage.cache_read_input_tokens ?? 0
+
+    if (created > 0) {
+      this.logger.log(`prompt cache MISS — wrote ${created} tokens to cache`)
+    } else if (read > 0) {
+      this.logger.log(`prompt cache HIT — read ${read} tokens from cache`)
+    } else {
+      this.logger.warn(`prompt cache BYPASS — no cache tokens (prompt may be below 1024 threshold)`)
+    }
   }
 
   /**

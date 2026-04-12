@@ -219,10 +219,14 @@ export class ChatRoomService {
       relations: ['room', 'room.creator'],
     })
 
-    // Exclude meeting rooms — they are only accessible from within the meeting page
+    // Exclude meeting rooms — they are only accessible from within the meeting page.
+    // Also exclude rooms with names starting with "meeting-" (created before meeting_id column existed).
+    const isMeetingRoom = (room: ChatRoom) =>
+      Boolean(room.meeting_id) || room.name.startsWith('meeting-')
+
     const rooms = memberships
       .map((membership) => membership.room!)
-      .filter((room) => Boolean(room) && !room.meeting_id)
+      .filter((room) => Boolean(room) && !isMeetingRoom(room))
 
     // Fetch member counts for all rooms in one query
     const roomIds = rooms.map((room) => room.id)
@@ -288,11 +292,14 @@ export class ChatRoomService {
    * Returns all public rooms (for discovery).
    */
   async findPublicRooms() {
-    const rooms = await this.chatRoomRepository.find({
-      where: { visibility: ChatRoomVisibility.PUBLIC },
-      relations: ['creator'],
-      order: { created_at: 'DESC' },
-    })
+    const rooms = await this.chatRoomRepository
+      .createQueryBuilder('room')
+      .leftJoinAndSelect('room.creator', 'creator')
+      .where('room.visibility = :visibility', { visibility: ChatRoomVisibility.PUBLIC })
+      .andWhere('room.meeting_id IS NULL')
+      .andWhere('room.name NOT LIKE :prefix', { prefix: 'meeting-%' })
+      .orderBy('room.created_at', 'DESC')
+      .getMany()
 
     if (rooms.length === 0) return rooms
 
@@ -653,6 +660,7 @@ export class ChatRoomService {
        JOIN users u ON u.id = m.user_id
        WHERE crm.user_id = ?
          AND cr.deleted_at IS NULL
+         AND cr.meeting_id IS NULL
          AND m.id = (
            SELECT MAX(m2.id) FROM messages m2
            WHERE m2.room_id = cr.id
@@ -700,6 +708,7 @@ export class ChatRoomService {
        JOIN users u ON u.id = m.user_id
        WHERE crm.user_id = ?
          AND cr.deleted_at IS NULL
+         AND cr.meeting_id IS NULL
          AND m.id = (
            SELECT MAX(m2.id) FROM messages m2
            WHERE m2.room_id = cr.id

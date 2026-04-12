@@ -55,7 +55,12 @@ export class MeetingHostSchedulesController {
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: CreateHostScheduleDto,
   ) {
-    const result = await this.hostSchedulesService.create(uuid, user.id, dto, isPrivilegedUser(user.roles))
+    const result = await this.hostSchedulesService.create(
+      uuid,
+      user.id,
+      dto,
+      isPrivilegedUser(user.roles),
+    )
     this.meetingsGateway.emitHostScheduleChanged(uuid)
     return result
   }
@@ -68,7 +73,13 @@ export class MeetingHostSchedulesController {
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: UpdateHostScheduleDto,
   ) {
-    const result = await this.hostSchedulesService.update(id, uuid, user.id, dto, isPrivilegedUser(user.roles))
+    const result = await this.hostSchedulesService.update(
+      id,
+      uuid,
+      user.id,
+      dto,
+      isPrivilegedUser(user.roles),
+    )
     this.meetingsGateway.emitHostScheduleChanged(uuid)
     return result
   }
