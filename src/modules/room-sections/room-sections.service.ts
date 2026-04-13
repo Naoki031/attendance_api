@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { RoomSection } from './entities/room-section.entity'
@@ -7,10 +7,14 @@ import { CreateRoomSectionDto } from './dto/create-room-section.dto'
 import { UpdateRoomSectionDto } from './dto/update-room-section.dto'
 import { AddRoomSectionItemDto } from './dto/add-room-section-item.dto'
 import { RemoveRoomSectionItemDto } from './dto/remove-room-section-item.dto'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class RoomSectionsService {
+  private readonly logger = new Logger(RoomSectionsService.name)
+
   constructor(
+    private readonly errorLogsService: ErrorLogsService,
     @InjectRepository(RoomSection)
     private readonly sectionRepository: Repository<RoomSection>,
 
@@ -23,31 +27,51 @@ export class RoomSectionsService {
    * Each section includes its items (eager-loaded).
    */
   async findAllForUser(userId: number): Promise<RoomSection[]> {
-    return this.sectionRepository.find({
-      where: { user_id: userId },
-      order: { position: 'ASC', created_at: 'ASC' },
-    })
+    try {
+      return this.sectionRepository.find({
+        where: { user_id: userId },
+        order: { position: 'ASC', created_at: 'ASC' },
+      })
+    } catch (error) {
+      this.logger.error('Failed to find sections for user', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find sections for user',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'room_sections',
+      })
+      throw error
+    }
   }
 
   /**
    * Creates a new section for the given user.
    */
   async create(userId: number, createDto: CreateRoomSectionDto): Promise<RoomSection> {
-    const maxPosition = await this.sectionRepository
-      .createQueryBuilder('section')
-      .select('MAX(section.position)', 'max')
-      .where('section.user_id = :userId', { userId })
-      .getRawOne<{ max: number | null }>()
+    try {
+      const maxPosition = await this.sectionRepository
+        .createQueryBuilder('section')
+        .select('MAX(section.position)', 'max')
+        .where('section.user_id = :userId', { userId })
+        .getRawOne<{ max: number | null }>()
 
-    const nextPosition = (maxPosition?.max ?? -1) + 1
+      const nextPosition = (maxPosition?.max ?? -1) + 1
 
-    const section = this.sectionRepository.create({
-      user_id: userId,
-      name: createDto.name,
-      position: createDto.position ?? nextPosition,
-    })
+      const section = this.sectionRepository.create({
+        user_id: userId,
+        name: createDto.name,
+        position: createDto.position ?? nextPosition,
+      })
 
-    return this.sectionRepository.save(section)
+      return this.sectionRepository.save(section)
+    } catch (error) {
+      this.logger.error('Failed to create section', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create section',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'room_sections',
+      })
+      throw error
+    }
   }
 
   /**
@@ -58,25 +82,45 @@ export class RoomSectionsService {
     sectionId: number,
     updateDto: UpdateRoomSectionDto,
   ): Promise<RoomSection> {
-    const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
-    if (!section) throw new NotFoundException('Section not found')
-    if (section.user_id !== userId) throw new ForbiddenException('Not your section')
+    try {
+      const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
+      if (!section) throw new NotFoundException('Section not found')
+      if (section.user_id !== userId) throw new ForbiddenException('Not your section')
 
-    if (updateDto.name !== undefined) section.name = updateDto.name
-    if (updateDto.position !== undefined) section.position = updateDto.position
+      if (updateDto.name !== undefined) section.name = updateDto.name
+      if (updateDto.position !== undefined) section.position = updateDto.position
 
-    return this.sectionRepository.save(section)
+      return this.sectionRepository.save(section)
+    } catch (error) {
+      this.logger.error('Failed to update section', error)
+      this.errorLogsService.logError({
+        message: 'Failed to update section',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'room_sections',
+      })
+      throw error
+    }
   }
 
   /**
    * Deletes a section. Items are cascade-deleted.
    */
   async remove(userId: number, sectionId: number): Promise<void> {
-    const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
-    if (!section) throw new NotFoundException('Section not found')
-    if (section.user_id !== userId) throw new ForbiddenException('Not your section')
+    try {
+      const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
+      if (!section) throw new NotFoundException('Section not found')
+      if (section.user_id !== userId) throw new ForbiddenException('Not your section')
 
-    await this.sectionRepository.delete({ id: sectionId })
+      await this.sectionRepository.delete({ id: sectionId })
+    } catch (error) {
+      this.logger.error('Failed to remove section', error)
+      this.errorLogsService.logError({
+        message: 'Failed to remove section',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'room_sections',
+      })
+      throw error
+    }
   }
 
   /**
@@ -88,34 +132,44 @@ export class RoomSectionsService {
     sectionId: number,
     addDto: AddRoomSectionItemDto,
   ): Promise<RoomSection> {
-    const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
-    if (!section) throw new NotFoundException('Section not found')
-    if (section.user_id !== userId) throw new ForbiddenException('Not your section')
+    try {
+      const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
+      if (!section) throw new NotFoundException('Section not found')
+      if (section.user_id !== userId) throw new ForbiddenException('Not your section')
 
-    // Remove from any existing section of this user first
-    const existingItem = await this.itemRepository
-      .createQueryBuilder('item')
-      .innerJoin('item.section', 'section')
-      .where('section.user_id = :userId', { userId })
-      .andWhere('item.resource_type = :type', { type: addDto.resource_type })
-      .andWhere('item.resource_id = :resourceId', { resourceId: addDto.resource_id })
-      .getOne()
+      // Remove from any existing section of this user first
+      const existingItem = await this.itemRepository
+        .createQueryBuilder('item')
+        .innerJoin('item.section', 'section')
+        .where('section.user_id = :userId', { userId })
+        .andWhere('item.resource_type = :type', { type: addDto.resource_type })
+        .andWhere('item.resource_id = :resourceId', { resourceId: addDto.resource_id })
+        .getOne()
 
-    if (existingItem) {
-      await this.itemRepository.delete({ id: existingItem.id })
+      if (existingItem) {
+        await this.itemRepository.delete({ id: existingItem.id })
+      }
+
+      await this.itemRepository.save(
+        this.itemRepository.create({
+          section_id: sectionId,
+          resource_type: addDto.resource_type,
+          resource_id: addDto.resource_id,
+        }),
+      )
+
+      return this.sectionRepository.findOne({
+        where: { id: sectionId },
+      }) as Promise<RoomSection>
+    } catch (error) {
+      this.logger.error('Failed to add item to section', error)
+      this.errorLogsService.logError({
+        message: 'Failed to add item to section',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'room_sections',
+      })
+      throw error
     }
-
-    await this.itemRepository.save(
-      this.itemRepository.create({
-        section_id: sectionId,
-        resource_type: addDto.resource_type,
-        resource_id: addDto.resource_id,
-      }),
-    )
-
-    return this.sectionRepository.findOne({
-      where: { id: sectionId },
-    }) as Promise<RoomSection>
   }
 
   /**
@@ -126,14 +180,24 @@ export class RoomSectionsService {
     sectionId: number,
     removeDto: RemoveRoomSectionItemDto,
   ): Promise<void> {
-    const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
-    if (!section) throw new NotFoundException('Section not found')
-    if (section.user_id !== userId) throw new ForbiddenException('Not your section')
+    try {
+      const section = await this.sectionRepository.findOne({ where: { id: sectionId } })
+      if (!section) throw new NotFoundException('Section not found')
+      if (section.user_id !== userId) throw new ForbiddenException('Not your section')
 
-    await this.itemRepository.delete({
-      section_id: sectionId,
-      resource_type: removeDto.resource_type,
-      resource_id: removeDto.resource_id,
-    })
+      await this.itemRepository.delete({
+        section_id: sectionId,
+        resource_type: removeDto.resource_type,
+        resource_id: removeDto.resource_id,
+      })
+    } catch (error) {
+      this.logger.error('Failed to remove item from section', error)
+      this.errorLogsService.logError({
+        message: 'Failed to remove item from section',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'room_sections',
+      })
+      throw error
+    }
   }
 }

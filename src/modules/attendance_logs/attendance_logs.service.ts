@@ -29,6 +29,7 @@ import type { ColumnConfigItem } from '@/modules/google_sheets/entities/company_
 import { FaceService } from '@/modules/face/face.service'
 import { StorageService } from '@/modules/storage/storage.service'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { isSuperAdmin } from '@/common/utils/is-privileged.utility'
 
 export interface FaceCheckinResult {
@@ -97,6 +98,7 @@ export class AttendanceLogsService {
     private readonly faceService: FaceService,
     private readonly storageService: StorageService,
     private readonly slackChannelsService: SlackChannelsService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -760,6 +762,11 @@ export class AttendanceLogsService {
       ])
     } catch (error) {
       this.logger.error('Failed to export attendance logs to Google Sheets', error)
+      this.errorLogsService.logError({
+        message: 'Failed to export attendance logs to Google Sheets',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'attendance_logs',
+      })
       this.slackChannelsService.sendSystemError(
         `[AttendanceLogs] Failed to export attendance logs to Google Sheets: ${(error as Error).message}`,
       )
@@ -858,6 +865,11 @@ export class AttendanceLogsService {
           filled++
         } catch (error) {
           this.logger.error(`[AUTO-FILL] Failed to fill absence for user ${userId}`, error)
+          this.errorLogsService.logError({
+            message: `Auto-fill absence failed for userId=${userId} date=${date}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: 'attendance_logs',
+          })
           this.slackChannelsService.sendSystemError(
             `[AttendanceLogs] Auto-fill absence failed for userId=${userId} date=${date}: ${(error as Error).message}`,
           )

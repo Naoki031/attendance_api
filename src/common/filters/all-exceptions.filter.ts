@@ -2,7 +2,6 @@ import { ExceptionFilter, Catch, ArgumentsHost, HttpException, Logger } from '@n
 import { Request, Response } from 'express'
 import { DataSource, Repository } from 'typeorm'
 import { ErrorLog } from '@/modules/error_logs/entities/error_log.entity'
-import type { ErrorLogLevel } from '@/modules/error_logs/entities/error_log.entity'
 
 const SENSITIVE_KEYS = [
   'password',
@@ -50,7 +49,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message =
         typeof exceptionResponse === 'string'
           ? exceptionResponse
-          : ((exceptionResponse as Record<string, unknown>).message ?? exception.message)
+          : String((exceptionResponse as Record<string, unknown>).message ?? exception.message)
       if (Array.isArray(message)) {
         message = message.join('; ')
       }
@@ -60,65 +59,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = String(exception)
     }
 
-    // Determine log level based on status code
-    let level: ErrorLogLevel = 'error'
-
+    // Only persist 5xx server errors to DB — 4xx are normal client errors (bad input, auth, not found)
+    // that would flood the table without real diagnostic value.
     if (statusCode >= 500) {
-      level = 'error'
-    } else if (statusCode >= 400) {
-      level = 'warn'
-    } else {
-      level = 'fatal'
+      this.persistErrorLog({
+        level: 'error',
+        message,
+        statusCode,
+        stackTrace: exception instanceof Error ? (exception.stack ?? null) : null,
+        request,
+        user: (request as unknown as Record<string, unknown>).user as Record<
+          string,
+          unknown
+        > | null,
+      })
     }
 
-    // Truncate message
+    // Log to console for Docker visibility (all status codes)
     const truncatedMessage =
       typeof message === 'string' && message.length > MAX_MESSAGE_LENGTH
         ? message.substring(0, MAX_MESSAGE_LENGTH)
         : String(message)
-
-    // Extract stack trace
-    const stackTrace = exception instanceof Error ? (exception.stack ?? null) : null
-
-    // Extract user context
-    const user = (request as Record<string, unknown>).user as Record<string, unknown> | null
-
-    // Sanitize request data
-    const sanitizedBody = this.sanitize(request.body)
-    const sanitizedHeaders = this.sanitize(request.headers)
-
-    // Build error log entry
-    const errorLogEntry = {
-      level,
-      message: truncatedMessage,
-      stack_trace: stackTrace,
-      status_code: statusCode,
-      path: request.url?.substring(0, 500),
-      method: request.method,
-      request_body: sanitizedBody ? JSON.stringify(sanitizedBody).substring(0, 65535) : null,
-      request_query: request.query ? JSON.stringify(request.query).substring(0, 1000) : null,
-      request_headers: JSON.stringify(sanitizedHeaders).substring(0, 65535),
-      user_id: user?.id ? Number(user.id) : null,
-      user_email: user?.email ? String(user.email).substring(0, 255) : null,
-      user_name: user?.full_name ? String(user.full_name).substring(0, 255) : null,
-      ip_address: (request.headers['x-forwarded-for'] as string | undefined) ?? request.ip ?? null,
-      user_agent: request.headers['user-agent']
-        ? String(request.headers['user-agent']).substring(0, 500)
-        : null,
-      is_resolved: false,
-    }
-
-    // Fire-and-forget async insert
-    this.errorLogRepository.insert(errorLogEntry).catch((databaseError) => {
-      this.logger.error(
-        'Failed to save error log to database',
-        databaseError instanceof Error ? databaseError.message : String(databaseError),
-      )
-    })
-
-    // Also log to console for Docker visibility
-    this.logger.error(
-      `[${level}] ${statusCode} ${request.method} ${request.url} - ${truncatedMessage}`,
+    this.logger.warn(
+      `[${statusCode >= 500 ? 'error' : 'warn'}] ${statusCode} ${request.method} ${request.url} - ${truncatedMessage}`,
     )
 
     // Send response to client
@@ -129,6 +92,56 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error: exception instanceof HttpException ? exception.name : 'Error',
       })
     }
+  }
+
+  /**
+   * Persists an error log entry to the database (fire-and-forget).
+   */
+  private persistErrorLog(data: {
+    level: 'error' | 'warn' | 'fatal'
+    message: string
+    statusCode: number
+    stackTrace: string | null
+    request: Request
+    user: Record<string, unknown> | null
+  }): void {
+    const truncatedMessage =
+      data.message.length > MAX_MESSAGE_LENGTH
+        ? data.message.substring(0, MAX_MESSAGE_LENGTH)
+        : data.message
+
+    const sanitizedBody = this.sanitize(data.request.body)
+    const sanitizedHeaders = this.sanitize(data.request.headers)
+
+    const entry = {
+      level: data.level,
+      message: truncatedMessage,
+      stack_trace: data.stackTrace,
+      status_code: data.statusCode,
+      path: data.request.url?.substring(0, 500),
+      method: data.request.method,
+      request_body: sanitizedBody ? JSON.stringify(sanitizedBody).substring(0, 65535) : null,
+      request_query: data.request.query
+        ? JSON.stringify(data.request.query).substring(0, 1000)
+        : null,
+      request_headers: JSON.stringify(sanitizedHeaders).substring(0, 65535),
+      user_id: data.user?.id ? Number(data.user.id) : null,
+      user_email: data.user?.email ? String(data.user.email).substring(0, 255) : null,
+      user_name: data.user?.full_name ? String(data.user.full_name).substring(0, 255) : null,
+      ip_address:
+        (data.request.headers['x-forwarded-for'] as string | undefined) ?? data.request.ip ?? null,
+      user_agent: data.request.headers['user-agent']
+        ? String(data.request.headers['user-agent']).substring(0, 500)
+        : null,
+      is_resolved: false,
+    }
+
+    this.errorLogRepository.insert(entry).catch((databaseError) => {
+      this.logger.error(
+        'Failed to save error log to database',
+        databaseError instanceof Error ? databaseError.message : String(databaseError),
+      )
+    })
   }
 
   /**

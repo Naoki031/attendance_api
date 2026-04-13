@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { ChatMessageItemDto } from './dto/chat-message.dto'
 import { PromptBuilderService } from './prompt-builder/prompt-builder.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class ChatbotService {
@@ -13,6 +14,7 @@ export class ChatbotService {
   constructor(
     private readonly configService: ConfigService,
     private readonly promptBuilder: PromptBuilderService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {
     const apiKey = this.configService.get<string>('ANTHROPIC_API_KEY')
 
@@ -81,6 +83,11 @@ export class ChatbotService {
       return this.parseResponse(rawText)
     } catch (error) {
       this.logger.error('Failed to get chatbot response', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get chatbot response',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chatbot',
+      })
 
       throw error
     }

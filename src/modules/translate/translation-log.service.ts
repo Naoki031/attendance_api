@@ -4,6 +4,7 @@ import { Repository, LessThan } from 'typeorm'
 import { TranslationLog } from './entities/translation_log.entity'
 import { QueryTranslationLogDto } from './dto/query-translation-log.dto'
 import moment from 'moment'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 export interface TranslationLogEntry {
   messageId?: number
@@ -52,6 +53,7 @@ export class TranslationLogService {
   constructor(
     @InjectRepository(TranslationLog)
     private readonly logRepository: Repository<TranslationLog>,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -77,6 +79,11 @@ export class TranslationLogService {
       })
     } catch (error) {
       this.logger.error('Failed to save translation log', error)
+      this.errorLogsService.logError({
+        message: 'Failed to save translation log',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'translation_log',
+      })
     }
   }
 
@@ -89,32 +96,42 @@ export class TranslationLogService {
     page: number
     limit: number
   }> {
-    const page = query.page ?? 1
-    const limit = query.limit ?? 50
-    const qb = this.logRepository.createQueryBuilder('log').orderBy('log.created_at', 'DESC')
+    try {
+      const page = query.page ?? 1
+      const limit = query.limit ?? 50
+      const qb = this.logRepository.createQueryBuilder('log').orderBy('log.created_at', 'DESC')
 
-    if (query.status) {
-      qb.andWhere('log.status = :status', { status: query.status })
-    }
+      if (query.status) {
+        qb.andWhere('log.status = :status', { status: query.status })
+      }
 
-    if (query.dateFrom) {
-      qb.andWhere('log.created_at >= :dateFrom', {
-        dateFrom: moment.utc(query.dateFrom).startOf('day').toDate(),
+      if (query.dateFrom) {
+        qb.andWhere('log.created_at >= :dateFrom', {
+          dateFrom: moment.utc(query.dateFrom).startOf('day').toDate(),
+        })
+      }
+
+      if (query.dateTo) {
+        qb.andWhere('log.created_at <= :dateTo', {
+          dateTo: moment.utc(query.dateTo).endOf('day').toDate(),
+        })
+      }
+
+      const [data, total] = await qb
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getManyAndCount()
+
+      return { data, total, page, limit }
+    } catch (error) {
+      this.logger.error('Failed to find translation logs', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find translation logs',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'translation_log',
       })
+      throw error
     }
-
-    if (query.dateTo) {
-      qb.andWhere('log.created_at <= :dateTo', {
-        dateTo: moment.utc(query.dateTo).endOf('day').toDate(),
-      })
-    }
-
-    const [data, total] = await qb
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount()
-
-    return { data, total, page, limit }
   }
 
   /**

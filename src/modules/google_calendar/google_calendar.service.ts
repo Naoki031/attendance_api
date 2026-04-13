@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { google } from 'googleapis'
 import type { EmployeeRequest } from '@/modules/employee_requests/entities/employee_request.entity'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import {
   EmployeeRequestType,
   LeaveType,
@@ -14,7 +15,10 @@ export class GoogleCalendarService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private calendar: any | null = null
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly errorLogsService: ErrorLogsService,
+  ) {
     this.initialize()
   }
 
@@ -41,6 +45,11 @@ export class GoogleCalendarService {
       this.calendar = google.calendar({ version: 'v3', auth })
     } catch (error) {
       this.logger.error('Failed to initialize Google Calendar client', error)
+      this.errorLogsService.logError({
+        message: 'Failed to initialize Google Calendar client',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'google_calendar',
+      })
     }
   }
 
@@ -150,6 +159,11 @@ export class GoogleCalendarService {
       return (response.data.id as string) ?? null
     } catch (error) {
       this.logger.error(`Failed to create calendar event for request #${requestId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to create calendar event for request #${requestId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'google_calendar',
+      })
       return null
     }
   }
@@ -237,6 +251,11 @@ export class GoogleCalendarService {
         await this.calendar.events.delete({ calendarId, eventId })
       } catch (error) {
         this.logger.error(`Failed to delete calendar event ${eventId}`, error)
+        this.errorLogsService.logError({
+          message: `Failed to delete calendar event ${eventId}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: 'google_calendar',
+        })
       }
     }
   }

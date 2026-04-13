@@ -24,6 +24,7 @@ import { GoogleSheetsService } from '@/modules/google_sheets/google_sheets.servi
 import { GoogleCalendarService } from '@/modules/google_calendar/google_calendar.service'
 import { EventsGateway } from '@/modules/events/events.gateway'
 import { AttendanceLogsService } from '@/modules/attendance_logs/attendance_logs.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 
 @Injectable()
@@ -46,6 +47,7 @@ export class EmployeeRequestsService {
     private readonly googleCalendarService: GoogleCalendarService,
     private readonly eventsGateway: EventsGateway,
     private readonly attendanceLogsService: AttendanceLogsService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -185,6 +187,11 @@ export class EmployeeRequestsService {
       return created
     } catch (error) {
       const companyId = await this.getCompanyId(requestingUser.id)
+      this.errorLogsService.logError({
+        message: `Failed to create employee request — user=${requestingUser.email} type=${createDto.type}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'employee_requests',
+      })
       await this.slackChannelsService.sendError(
         `❌ **Failed to create employee request**\n*User:* ${requestingUser.full_name} (${requestingUser.email})\n*Type:* ${createDto.type}\n*Error:* ${error}`,
         companyId ?? undefined,
@@ -349,6 +356,11 @@ export class EmployeeRequestsService {
     } catch (error) {
       const request = await this.findOne(id).catch(() => null)
       const companyId = request ? await this.getCompanyId(request.user_id) : null
+      this.errorLogsService.logError({
+        message: `Failed to update employee request id=${id} type=${request?.type ?? 'N/A'}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'employee_requests',
+      })
       await this.slackChannelsService.sendError(
         `❌ **Failed to update employee request**\n*Request ID:* ${id}\n*Type:* ${request?.type ?? 'N/A'}\n*User:* ${requestingUser.full_name}\n*Error:* ${error}`,
         companyId ?? undefined,
@@ -432,6 +444,11 @@ export class EmployeeRequestsService {
         )
       } catch (error) {
         this.logger.error('[CLOCK_FORGET] Failed to apply to attendance log', error)
+        this.errorLogsService.logError({
+          message: `[CLOCK_FORGET] Failed to apply attendance log for request #${request.id}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: 'employee_requests',
+        })
         await this.slackChannelsService.sendSystemError(
           `[CLOCK_FORGET] Failed to apply attendance log for request #${request.id} (user_id: ${request.user_id}, date: ${request.forget_date}): ${(error as Error).message}`,
         )

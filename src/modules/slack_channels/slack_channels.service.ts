@@ -8,6 +8,7 @@ import { HttpService } from '@nestjs/axios'
 import { firstValueFrom } from 'rxjs'
 import { User } from '@/modules/users/entities/user.entity'
 import { ConfigService } from '@nestjs/config'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class SlackChannelsService {
@@ -20,6 +21,7 @@ export class SlackChannelsService {
     private readonly userRepository: Repository<User>,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -231,6 +233,11 @@ export class SlackChannelsService {
       await firstValueFrom(this.httpService.post(channel.webhook_url, { text: finalMessage }))
     } catch (error) {
       this.logger.error('Failed to send Slack message', error)
+      this.errorLogsService.logError({
+        message: 'Failed to send Slack message',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'slack_channels',
+      })
     }
   }
 
@@ -298,6 +305,11 @@ export class SlackChannelsService {
       await firstValueFrom(this.httpService.post(webhookUrl, payload))
     } catch (error) {
       this.logger.error('Failed to send system error to Slack', error)
+      this.errorLogsService.logError({
+        message: 'Failed to send system error to Slack',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'slack_channels',
+      })
     }
   }
 }

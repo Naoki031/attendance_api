@@ -6,12 +6,14 @@ import { BugReportsController } from './bug_reports.controller'
 import { UserDepartment } from '@/modules/user_departments/entities/user_department.entity'
 import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
 import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/user_group_permissions.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([BugReport, UserDepartment]),
     SlackChannelsModule,
     UserGroupPermissionsModule,
+    ErrorLogsModule,
   ],
   controllers: [BugReportsController],
   providers: [BugReportsService],

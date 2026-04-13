@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { PromptSection, PromptRole, DataContext } from './types'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 const TONE_INSTRUCTIONS: Record<string, string> = {
   professional: `
@@ -46,11 +47,24 @@ export class PromptBuilderService implements OnModuleInit {
   private assembledPrompts: Map<string, string> = new Map()
   private defaultTone: string = 'professional'
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly errorLogsService: ErrorLogsService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.loadSections()
-    this.assembleAll()
+    try {
+      await this.loadSections()
+      this.assembleAll()
+    } catch (error) {
+      this.logger.error('Failed to initialize prompt sections', error)
+      this.errorLogsService.logError({
+        message: 'Failed to initialize prompt sections',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'prompt_builder',
+      })
+      throw error
+    }
   }
 
   private resolvePromptsDir(): string {
@@ -135,7 +149,17 @@ export class PromptBuilderService implements OnModuleInit {
    * Fast path — no file I/O, reads from memory cache.
    */
   getBasePrompt(role: PromptRole): string {
-    return this.assembledPrompts.get(role) ?? ''
+    try {
+      return this.assembledPrompts.get(role) ?? ''
+    } catch (error) {
+      this.logger.error('Failed to get base prompt', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get base prompt',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'prompt_builder',
+      })
+      throw error
+    }
   }
 
   /**
@@ -148,32 +172,33 @@ export class PromptBuilderService implements OnModuleInit {
     isAdmin: boolean
     dataContext?: DataContext
   }): string {
-    const { tone, language, isAdmin, dataContext } = options
-    const role: PromptRole = isAdmin ? 'admin' : 'employee'
-    const resolvedTone = tone && TONE_INSTRUCTIONS[tone] ? tone : this.defaultTone
-    const chatbotName = this.configService.get<string>('CHATBOT_NAME')
+    try {
+      const { tone, language, isAdmin, dataContext } = options
+      const role: PromptRole = isAdmin ? 'admin' : 'employee'
+      const resolvedTone = tone && TONE_INSTRUCTIONS[tone] ? tone : this.defaultTone
+      const chatbotName = this.configService.get<string>('CHATBOT_NAME')
 
-    let prompt = this.getBasePrompt(role) + (TONE_INSTRUCTIONS[resolvedTone] ?? '')
+      let prompt = this.getBasePrompt(role) + (TONE_INSTRUCTIONS[resolvedTone] ?? '')
 
-    if (chatbotName) {
-      prompt =
-        `Your name is "${chatbotName}". When users ask your name, introduce yourself as ${chatbotName}.\n\n` +
-        prompt
-    }
-
-    if (language) {
-      prompt += `\n\nIMPORTANT: The user is communicating in ${language}. You MUST respond in ${language} only. Do not switch languages.`
-    }
-
-    if (dataContext && Object.keys(dataContext).length > 0) {
-      prompt += '\n\n## Current System Data\n'
-
-      for (const [key, value] of Object.entries(dataContext)) {
-        prompt += `- ${key}: ${value}\n`
+      if (chatbotName) {
+        prompt =
+          `Your name is "${chatbotName}". When users ask your name, introduce yourself as ${chatbotName}.\n\n` +
+          prompt
       }
-    }
 
-    prompt += `
+      if (language) {
+        prompt += `\n\nIMPORTANT: The user is communicating in ${language}. You MUST respond in ${language} only. Do not switch languages.`
+      }
+
+      if (dataContext && Object.keys(dataContext).length > 0) {
+        prompt += '\n\n## Current System Data\n'
+
+        for (const [key, value] of Object.entries(dataContext)) {
+          prompt += `- ${key}: ${value}\n`
+        }
+      }
+
+      prompt += `
 
 ## Follow-up Suggestions
 After every response, append exactly 3 short follow-up questions the user might want to ask next.
@@ -188,19 +213,38 @@ Rules:
 - Each suggestion must be on its own line.
 - Do not add labels, numbers, or extra text inside the block.
 - The <suggestions> block must always be the very last thing in your response.${
-      !isAdmin
-        ? '\n- Only suggest questions about features available to regular employees: Home page, My Requests, Profile, clock-in/out methods, and request submission. Do NOT suggest questions about admin-only features such as approvals, user management, attendance logs, QR code generation, Slack configuration, or system settings.'
-        : ''
-    }`
+        !isAdmin
+          ? '\n- Only suggest questions about features available to regular employees: Home page, My Requests, Profile, clock-in/out methods, and request submission. Do NOT suggest questions about admin-only features such as approvals, user management, attendance logs, QR code generation, Slack configuration, or system settings.'
+          : ''
+      }`
 
-    return prompt
+      return prompt
+    } catch (error) {
+      this.logger.error('Failed to build system prompt', error)
+      this.errorLogsService.logError({
+        message: 'Failed to build system prompt',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'prompt_builder',
+      })
+      throw error
+    }
   }
 
   /**
    * Returns the number of loaded sections (for the reload endpoint).
    */
   getSectionCount(): number {
-    return this.sections.length
+    try {
+      return this.sections.length
+    } catch (error) {
+      this.logger.error('Failed to get section count', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get section count',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'prompt_builder',
+      })
+      throw error
+    }
   }
 
   /**
@@ -208,8 +252,18 @@ Rules:
    * Called via admin endpoint for dev convenience.
    */
   async reload(): Promise<void> {
-    this.logger.log('Reloading prompt sections from disk...')
-    await this.loadSections()
-    this.assembleAll()
+    try {
+      this.logger.log('Reloading prompt sections from disk...')
+      await this.loadSections()
+      this.assembleAll()
+    } catch (error) {
+      this.logger.error('Failed to reload prompt sections', error)
+      this.errorLogsService.logError({
+        message: 'Failed to reload prompt sections',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'prompt_builder',
+      })
+      throw error
+    }
   }
 }

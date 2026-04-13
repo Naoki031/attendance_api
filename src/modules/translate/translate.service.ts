@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import moment from 'moment'
 import { TranslationCache } from './entities/translation_cache.entity'
 import { TranslationLogService } from './translation-log.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 // IT/dev terms that must stay as-is. Exclude common English words (request, session, token)
 // that have natural translations in conversational context.
@@ -369,6 +370,7 @@ export class TranslateService {
     @InjectRepository(TranslationCache)
     private readonly translationCacheRepository: Repository<TranslationCache>,
     private readonly translationLogService: TranslationLogService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {
     this.model = this.configService.get<string>('TRANSLATE_MODEL') ?? 'claude-haiku-4-5-20251001'
     this.maxTokens = parseInt(this.configService.get<string>('TRANSLATE_MAX_TOKENS') ?? '8192', 10)
@@ -419,6 +421,11 @@ export class TranslateService {
       return languageCode || 'en'
     } catch (error) {
       this.logger.error('Failed to detect language', error)
+      this.errorLogsService.logError({
+        message: 'Failed to detect language',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'translate',
+      })
 
       return 'en'
     }
@@ -634,6 +641,11 @@ export class TranslateService {
       ])
     } catch (error) {
       this.logger.error('Failed to save translation cache', error)
+      this.errorLogsService.logError({
+        message: `Failed to save translation cache for messageId=${messageId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'translate',
+      })
     }
 
     return this.pickTranslations(merged, targetLangs)
@@ -644,6 +656,11 @@ export class TranslateService {
       await this.translationCacheRepository.delete({ messageId })
     } catch (error) {
       this.logger.error('Failed to invalidate translation cache', error)
+      this.errorLogsService.logError({
+        message: `Failed to invalidate translation cache for messageId=${messageId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'translate',
+      })
     }
   }
 
@@ -652,6 +669,11 @@ export class TranslateService {
       return await this.translationCacheRepository.findOneBy({ messageId })
     } catch (error) {
       this.logger.error('Failed to query translation cache', error)
+      this.errorLogsService.logError({
+        message: `Failed to query translation cache for messageId=${messageId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'translate',
+      })
 
       return null
     }
@@ -777,6 +799,11 @@ export class TranslateService {
         this.logger.error(
           `translateToSingle failed — target=${targetLang} attempt=${attempt}: ${(error as Error).message}`,
         )
+        this.errorLogsService.logError({
+          message: `Translation failed — target=${targetLang} attempt=${attempt}: ${(error as Error).message}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: 'translate',
+        })
 
         this.fireAndForgetSessionLog({
           logContext,

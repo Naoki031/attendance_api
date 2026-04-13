@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   ConflictException,
@@ -10,9 +11,11 @@ import { Repository } from 'typeorm'
 import moment from 'moment'
 import { MeetingHostSchedule, HostScheduleType } from './entities/meeting_host_schedule.entity'
 import { Meeting } from './entities/meeting.entity'
+import { MeetingParticipant, MeetingParticipantRole } from './entities/meeting_participant.entity'
 import { CreateHostScheduleDto } from './dto/create-host-schedule.dto'
 import { UpdateHostScheduleDto } from './dto/update-host-schedule.dto'
 import { SwapDatesDto } from './dto/swap-dates.dto'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 /** Priority order: most specific type wins when multiple schedules match the same date. */
 const SCHEDULE_TYPE_PRIORITY: Record<HostScheduleType, number> = {
@@ -24,11 +27,16 @@ const SCHEDULE_TYPE_PRIORITY: Record<HostScheduleType, number> = {
 
 @Injectable()
 export class MeetingHostSchedulesService {
+  private readonly logger = new Logger(MeetingHostSchedulesService.name)
+
   constructor(
     @InjectRepository(MeetingHostSchedule)
     private readonly scheduleRepository: Repository<MeetingHostSchedule>,
     @InjectRepository(Meeting)
     private readonly meetingRepository: Repository<Meeting>,
+    @InjectRepository(MeetingParticipant)
+    private readonly participantRepository: Repository<MeetingParticipant>,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   async create(
@@ -37,41 +45,61 @@ export class MeetingHostSchedulesService {
     dto: CreateHostScheduleDto,
     isPrivileged = false,
   ): Promise<MeetingHostSchedule> {
-    const meeting = await this.findMeetingByUuid(meetingUuid)
-    this.assertCanManage(meeting, requestUserId, isPrivileged)
+    try {
+      const meeting = await this.findMeetingByUuid(meetingUuid)
+      await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
-    await this.assertNoDuplicateDates(meeting.id, dto)
+      await this.assertNoDuplicateDates(meeting.id, dto)
 
-    const schedule = this.scheduleRepository.create({
-      meeting_id: meeting.id,
-      user_id: dto.user_id,
-      schedule_type: dto.schedule_type,
-      date: dto.date,
-      dates: dto.dates,
-      date_from: dto.date_from,
-      date_to: dto.date_to,
-      day_of_week: dto.day_of_week,
-      interval_weeks: dto.interval_weeks,
-      recur_start_date: dto.recur_start_date,
-      recur_end_date: dto.recur_end_date,
-      is_active: true,
-    })
+      const schedule = this.scheduleRepository.create({
+        meeting_id: meeting.id,
+        user_id: dto.user_id,
+        schedule_type: dto.schedule_type,
+        date: dto.date,
+        dates: dto.dates,
+        date_from: dto.date_from,
+        date_to: dto.date_to,
+        day_of_week: dto.day_of_week,
+        interval_weeks: dto.interval_weeks,
+        recur_start_date: dto.recur_start_date,
+        recur_end_date: dto.recur_end_date,
+        is_active: true,
+      })
 
-    const saved = await this.scheduleRepository.save(schedule)
-    return this.scheduleRepository.findOne({
-      where: { id: saved.id },
-      relations: ['user'],
-    }) as Promise<MeetingHostSchedule>
+      const saved = await this.scheduleRepository.save(schedule)
+      return this.scheduleRepository.findOne({
+        where: { id: saved.id },
+        relations: ['user'],
+      }) as Promise<MeetingHostSchedule>
+    } catch (error) {
+      this.logger.error('Failed to create host schedule', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create host schedule',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   async findAll(meetingUuid: string): Promise<MeetingHostSchedule[]> {
-    const meeting = await this.findMeetingByUuid(meetingUuid)
+    try {
+      const meeting = await this.findMeetingByUuid(meetingUuid)
 
-    return this.scheduleRepository.find({
-      where: { meeting_id: meeting.id },
-      relations: ['user'],
-      order: { created_at: 'DESC' },
-    })
+      return this.scheduleRepository.find({
+        where: { meeting_id: meeting.id },
+        relations: ['user'],
+        order: { created_at: 'DESC' },
+      })
+    } catch (error) {
+      this.logger.error('Failed to find host schedules', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find host schedules',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   async update(
@@ -81,30 +109,40 @@ export class MeetingHostSchedulesService {
     dto: UpdateHostScheduleDto,
     isPrivileged = false,
   ): Promise<MeetingHostSchedule> {
-    const meeting = await this.findMeetingByUuid(meetingUuid)
-    this.assertCanManage(meeting, requestUserId, isPrivileged)
+    try {
+      const meeting = await this.findMeetingByUuid(meetingUuid)
+      await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
-    const schedule = await this.findScheduleById(scheduleId, meeting.id)
+      const schedule = await this.findScheduleById(scheduleId, meeting.id)
 
-    if (dto.user_id !== undefined) schedule.user_id = dto.user_id
-    if (dto.schedule_type !== undefined) schedule.schedule_type = dto.schedule_type
-    if (dto.date !== undefined) schedule.date = dto.date
-    if (dto.dates !== undefined) schedule.dates = dto.dates
-    if (dto.date_from !== undefined) schedule.date_from = dto.date_from
-    if (dto.date_to !== undefined) schedule.date_to = dto.date_to
-    if (dto.day_of_week !== undefined) schedule.day_of_week = dto.day_of_week
-    if (dto.interval_weeks !== undefined) schedule.interval_weeks = dto.interval_weeks
-    if (dto.recur_start_date !== undefined) schedule.recur_start_date = dto.recur_start_date
-    if (dto.recur_end_date !== undefined) schedule.recur_end_date = dto.recur_end_date
-    if (dto.is_active !== undefined) schedule.is_active = dto.is_active
+      if (dto.user_id !== undefined) schedule.user_id = dto.user_id
+      if (dto.schedule_type !== undefined) schedule.schedule_type = dto.schedule_type
+      if (dto.date !== undefined) schedule.date = dto.date
+      if (dto.dates !== undefined) schedule.dates = dto.dates
+      if (dto.date_from !== undefined) schedule.date_from = dto.date_from
+      if (dto.date_to !== undefined) schedule.date_to = dto.date_to
+      if (dto.day_of_week !== undefined) schedule.day_of_week = dto.day_of_week
+      if (dto.interval_weeks !== undefined) schedule.interval_weeks = dto.interval_weeks
+      if (dto.recur_start_date !== undefined) schedule.recur_start_date = dto.recur_start_date
+      if (dto.recur_end_date !== undefined) schedule.recur_end_date = dto.recur_end_date
+      if (dto.is_active !== undefined) schedule.is_active = dto.is_active
 
-    await this.assertNoDuplicateDates(meeting.id, schedule, schedule.id)
+      await this.assertNoDuplicateDates(meeting.id, schedule, schedule.id)
 
-    await this.scheduleRepository.save(schedule)
-    return this.scheduleRepository.findOne({
-      where: { id: schedule.id },
-      relations: ['user'],
-    }) as Promise<MeetingHostSchedule>
+      await this.scheduleRepository.save(schedule)
+      return this.scheduleRepository.findOne({
+        where: { id: schedule.id },
+        relations: ['user'],
+      }) as Promise<MeetingHostSchedule>
+    } catch (error) {
+      this.logger.error('Failed to update host schedule', error)
+      this.errorLogsService.logError({
+        message: 'Failed to update host schedule',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   async remove(
@@ -113,11 +151,21 @@ export class MeetingHostSchedulesService {
     requestUserId: number,
     isPrivileged = false,
   ): Promise<void> {
-    const meeting = await this.findMeetingByUuid(meetingUuid)
-    this.assertCanManage(meeting, requestUserId, isPrivileged)
+    try {
+      const meeting = await this.findMeetingByUuid(meetingUuid)
+      await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
-    const schedule = await this.findScheduleById(scheduleId, meeting.id)
-    await this.scheduleRepository.remove(schedule)
+      const schedule = await this.findScheduleById(scheduleId, meeting.id)
+      await this.scheduleRepository.remove(schedule)
+    } catch (error) {
+      this.logger.error('Failed to remove host schedule', error)
+      this.errorLogsService.logError({
+        message: 'Failed to remove host schedule',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   /**
@@ -125,34 +173,54 @@ export class MeetingHostSchedulesService {
    * Falls back to meeting.host_id (owner) when no schedule matches.
    */
   async resolveHostForDate(meetingId: number, date: string): Promise<number | null> {
-    const meeting = await this.meetingRepository.findOne({ where: { id: meetingId } })
-    if (!meeting) throw new NotFoundException(`Meeting #${meetingId} not found`)
+    try {
+      const meeting = await this.meetingRepository.findOne({ where: { id: meetingId } })
+      if (!meeting) throw new NotFoundException(`Meeting #${meetingId} not found`)
 
-    const schedules = await this.scheduleRepository.find({
-      where: { meeting_id: meetingId, is_active: true },
-    })
+      const schedules = await this.scheduleRepository.find({
+        where: { meeting_id: meetingId, is_active: true },
+      })
 
-    const matching = schedules.filter((schedule) => this.matchesDate(schedule, date))
+      const matching = schedules.filter((schedule) => this.matchesDate(schedule, date))
 
-    if (matching.length === 0) return null
+      if (matching.length === 0) return null
 
-    // Pick the most specific (highest priority). Tie-break: latest created_at.
-    matching.sort((scheduleA, scheduleB) => {
-      const priorityDiff =
-        SCHEDULE_TYPE_PRIORITY[scheduleB.schedule_type] -
-        SCHEDULE_TYPE_PRIORITY[scheduleA.schedule_type]
-      if (priorityDiff !== 0) return priorityDiff
-      return scheduleB.created_at.getTime() - scheduleA.created_at.getTime()
-    })
+      // Pick the most specific (highest priority). Tie-break: latest created_at.
+      matching.sort((scheduleA, scheduleB) => {
+        const priorityDiff =
+          SCHEDULE_TYPE_PRIORITY[scheduleB.schedule_type] -
+          SCHEDULE_TYPE_PRIORITY[scheduleA.schedule_type]
+        if (priorityDiff !== 0) return priorityDiff
+        return scheduleB.created_at.getTime() - scheduleA.created_at.getTime()
+      })
 
-    return matching[0]!.user_id
+      return matching[0]!.user_id
+    } catch (error) {
+      this.logger.error('Failed to resolve host for date', error)
+      this.errorLogsService.logError({
+        message: 'Failed to resolve host for date',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   /** Same as resolveHostForDate but accepts a meeting UUID — used by the HTTP endpoint. */
   async resolveHostForDateByUuid(meetingUuid: string, date: string): Promise<number | null> {
-    const meeting = await this.findMeetingByUuid(meetingUuid)
+    try {
+      const meeting = await this.findMeetingByUuid(meetingUuid)
 
-    return this.resolveHostForDate(meeting.id, date)
+      return this.resolveHostForDate(meeting.id, date)
+    } catch (error) {
+      this.logger.error('Failed to resolve host for date by UUID', error)
+      this.errorLogsService.logError({
+        message: 'Failed to resolve host for date by UUID',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   /**
@@ -166,32 +234,42 @@ export class MeetingHostSchedulesService {
     date: string,
     isPrivileged = false,
   ): Promise<void> {
-    this.assertDateNotPast(date)
-    const meeting = await this.findMeetingByUuid(meetingUuid)
-    this.assertCanManage(meeting, requestUserId, isPrivileged)
+    try {
+      this.assertDateNotPast(date)
+      const meeting = await this.findMeetingByUuid(meetingUuid)
+      await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
-    const schedule = await this.findScheduleById(scheduleId, meeting.id)
+      const schedule = await this.findScheduleById(scheduleId, meeting.id)
 
-    // For one_time: just delete — excluding the only date leaves an empty record
-    if (schedule.schedule_type === HostScheduleType.ONE_TIME) {
-      await this.scheduleRepository.remove(schedule)
-      return
-    }
-
-    // For date_list: remove the specific date from the array
-    if (schedule.schedule_type === HostScheduleType.DATE_LIST) {
-      const updated = (schedule.dates ?? []).filter((dateItem) => dateItem !== date)
-      if (updated.length === 0) {
+      // For one_time: just delete — excluding the only date leaves an empty record
+      if (schedule.schedule_type === HostScheduleType.ONE_TIME) {
         await this.scheduleRepository.remove(schedule)
         return
       }
-      await this.scheduleRepository.update({ id: schedule.id }, { dates: updated })
-      return
-    }
 
-    // For date_range / recurring: add to excluded_dates
-    const excluded = [...(schedule.excluded_dates ?? []), date]
-    await this.scheduleRepository.update({ id: schedule.id }, { excluded_dates: excluded })
+      // For date_list: remove the specific date from the array
+      if (schedule.schedule_type === HostScheduleType.DATE_LIST) {
+        const updated = (schedule.dates ?? []).filter((dateItem) => dateItem !== date)
+        if (updated.length === 0) {
+          await this.scheduleRepository.remove(schedule)
+          return
+        }
+        await this.scheduleRepository.update({ id: schedule.id }, { dates: updated })
+        return
+      }
+
+      // For date_range / recurring: add to excluded_dates
+      const excluded = [...(schedule.excluded_dates ?? []), date]
+      await this.scheduleRepository.update({ id: schedule.id }, { excluded_dates: excluded })
+    } catch (error) {
+      this.logger.error('Failed to exclude date from host schedule', error)
+      this.errorLogsService.logError({
+        message: 'Failed to exclude date from host schedule',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
+    }
   }
 
   /**
@@ -205,41 +283,51 @@ export class MeetingHostSchedulesService {
     date: string,
     isPrivileged = false,
   ): Promise<void> {
-    this.assertDateNotPast(date)
-    const meeting = await this.findMeetingByUuid(meetingUuid)
-    this.assertCanManage(meeting, requestUserId, isPrivileged)
+    try {
+      this.assertDateNotPast(date)
+      const meeting = await this.findMeetingByUuid(meetingUuid)
+      await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
-    const schedule = await this.findScheduleById(scheduleId, meeting.id)
-    const dayBefore = moment(date).subtract(1, 'day').format('YYYY-MM-DD')
+      const schedule = await this.findScheduleById(scheduleId, meeting.id)
+      const dayBefore = moment(date).subtract(1, 'day').format('YYYY-MM-DD')
 
-    switch (schedule.schedule_type) {
-      case HostScheduleType.ONE_TIME:
-        // The one date is being removed — delete the record
-        await this.scheduleRepository.remove(schedule)
-        return
-
-      case HostScheduleType.DATE_LIST: {
-        const remaining = (schedule.dates ?? []).filter((dateItem) => dateItem < date)
-        if (remaining.length === 0) {
+      switch (schedule.schedule_type) {
+        case HostScheduleType.ONE_TIME:
+          // The one date is being removed — delete the record
           await this.scheduleRepository.remove(schedule)
           return
+
+        case HostScheduleType.DATE_LIST: {
+          const remaining = (schedule.dates ?? []).filter((dateItem) => dateItem < date)
+          if (remaining.length === 0) {
+            await this.scheduleRepository.remove(schedule)
+            return
+          }
+          await this.scheduleRepository.update({ id: schedule.id }, { dates: remaining })
+          return
         }
-        await this.scheduleRepository.update({ id: schedule.id }, { dates: remaining })
-        return
+
+        case HostScheduleType.DATE_RANGE:
+          if (!schedule.date_from || dayBefore < schedule.date_from) {
+            // Entire range is removed
+            await this.scheduleRepository.remove(schedule)
+            return
+          }
+          await this.scheduleRepository.update({ id: schedule.id }, { date_to: dayBefore })
+          return
+
+        case HostScheduleType.RECURRING:
+          await this.scheduleRepository.update({ id: schedule.id }, { recur_end_date: dayBefore })
+          return
       }
-
-      case HostScheduleType.DATE_RANGE:
-        if (!schedule.date_from || dayBefore < schedule.date_from) {
-          // Entire range is removed
-          await this.scheduleRepository.remove(schedule)
-          return
-        }
-        await this.scheduleRepository.update({ id: schedule.id }, { date_to: dayBefore })
-        return
-
-      case HostScheduleType.RECURRING:
-        await this.scheduleRepository.update({ id: schedule.id }, { recur_end_date: dayBefore })
-        return
+    } catch (error) {
+      this.logger.error('Failed to truncate host schedule from date', error)
+      this.errorLogsService.logError({
+        message: 'Failed to truncate host schedule from date',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
     }
   }
 
@@ -254,62 +342,72 @@ export class MeetingHostSchedulesService {
     dto: SwapDatesDto,
     isPrivileged = false,
   ): Promise<void> {
-    const meeting = await this.findMeetingByUuid(meetingUuid)
-    this.assertCanManage(meeting, requestUserId, isPrivileged)
+    try {
+      const meeting = await this.findMeetingByUuid(meetingUuid)
+      await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
-    if (dto.date_a === dto.date_b) {
-      throw new BadRequestException('Cannot swap a date with itself')
+      if (dto.date_a === dto.date_b) {
+        throw new BadRequestException('Cannot swap a date with itself')
+      }
+
+      const resolvedA = await this.resolveScheduleForDate(meeting.id, dto.date_a)
+      const resolvedB = await this.resolveScheduleForDate(meeting.id, dto.date_b)
+
+      if (!resolvedA) {
+        throw new BadRequestException(`No host scheduled on ${dto.date_a}`)
+      }
+      if (!resolvedB) {
+        throw new BadRequestException(`No host scheduled on ${dto.date_b}`)
+      }
+      if (resolvedA.userId === resolvedB.userId) {
+        throw new BadRequestException('Both dates are hosted by the same person — nothing to swap')
+      }
+
+      // Step 1: exclude each date from its current schedule
+      const excludedA = [...(resolvedA.schedule.excluded_dates ?? []), dto.date_a]
+      const excludedB = [...(resolvedB.schedule.excluded_dates ?? []), dto.date_b]
+
+      await Promise.all([
+        resolvedA.schedule.schedule_type === HostScheduleType.ONE_TIME
+          ? this.scheduleRepository.remove(resolvedA.schedule)
+          : this.scheduleRepository.update(
+              { id: resolvedA.schedule.id },
+              { excluded_dates: excludedA },
+            ),
+        resolvedB.schedule.schedule_type === HostScheduleType.ONE_TIME
+          ? this.scheduleRepository.remove(resolvedB.schedule)
+          : this.scheduleRepository.update(
+              { id: resolvedB.schedule.id },
+              { excluded_dates: excludedB },
+            ),
+      ])
+
+      // Step 2: create new one_time entries with swapped hosts
+      await this.scheduleRepository.save([
+        this.scheduleRepository.create({
+          meeting_id: meeting.id,
+          user_id: resolvedB.userId, // host B now covers date A
+          schedule_type: HostScheduleType.ONE_TIME,
+          date: dto.date_a,
+          is_active: true,
+        }),
+        this.scheduleRepository.create({
+          meeting_id: meeting.id,
+          user_id: resolvedA.userId, // host A now covers date B
+          schedule_type: HostScheduleType.ONE_TIME,
+          date: dto.date_b,
+          is_active: true,
+        }),
+      ])
+    } catch (error) {
+      this.logger.error('Failed to swap host schedule dates', error)
+      this.errorLogsService.logError({
+        message: 'Failed to swap host schedule dates',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_host_schedules',
+      })
+      throw error
     }
-
-    const resolvedA = await this.resolveScheduleForDate(meeting.id, dto.date_a)
-    const resolvedB = await this.resolveScheduleForDate(meeting.id, dto.date_b)
-
-    if (!resolvedA) {
-      throw new BadRequestException(`No host scheduled on ${dto.date_a}`)
-    }
-    if (!resolvedB) {
-      throw new BadRequestException(`No host scheduled on ${dto.date_b}`)
-    }
-    if (resolvedA.userId === resolvedB.userId) {
-      throw new BadRequestException('Both dates are hosted by the same person — nothing to swap')
-    }
-
-    // Step 1: exclude each date from its current schedule
-    const excludedA = [...(resolvedA.schedule.excluded_dates ?? []), dto.date_a]
-    const excludedB = [...(resolvedB.schedule.excluded_dates ?? []), dto.date_b]
-
-    await Promise.all([
-      resolvedA.schedule.schedule_type === HostScheduleType.ONE_TIME
-        ? this.scheduleRepository.remove(resolvedA.schedule)
-        : this.scheduleRepository.update(
-            { id: resolvedA.schedule.id },
-            { excluded_dates: excludedA },
-          ),
-      resolvedB.schedule.schedule_type === HostScheduleType.ONE_TIME
-        ? this.scheduleRepository.remove(resolvedB.schedule)
-        : this.scheduleRepository.update(
-            { id: resolvedB.schedule.id },
-            { excluded_dates: excludedB },
-          ),
-    ])
-
-    // Step 2: create new one_time entries with swapped hosts
-    await this.scheduleRepository.save([
-      this.scheduleRepository.create({
-        meeting_id: meeting.id,
-        user_id: resolvedB.userId, // host B now covers date A
-        schedule_type: HostScheduleType.ONE_TIME,
-        date: dto.date_a,
-        is_active: true,
-      }),
-      this.scheduleRepository.create({
-        meeting_id: meeting.id,
-        user_id: resolvedA.userId, // host A now covers date B
-        schedule_type: HostScheduleType.ONE_TIME,
-        date: dto.date_b,
-        is_active: true,
-      }),
-    ])
   }
 
   // ---------------------------------------------------------------------------
@@ -534,10 +632,27 @@ export class MeetingHostSchedulesService {
     return schedule
   }
 
-  private assertCanManage(meeting: Meeting, userId: number, isPrivileged: boolean): void {
+  private async isCoHostInDb(meetingId: number, userId: number): Promise<boolean> {
+    const participant = await this.participantRepository.findOneBy({
+      meeting_id: meetingId,
+      user_id: userId,
+      role: MeetingParticipantRole.CO_HOST,
+    })
+    return !!participant
+  }
+
+  private async assertCanManage(
+    meeting: Meeting,
+    userId: number,
+    isPrivileged: boolean,
+  ): Promise<void> {
     if (isPrivileged) return
-    if (meeting.host_id !== userId) {
-      throw new ForbiddenException('Only the meeting owner or an admin can manage host schedules')
+    if (meeting.host_id === userId) return
+    const isCoHost = await this.isCoHostInDb(meeting.id, userId)
+    if (!isCoHost) {
+      throw new ForbiddenException(
+        'Only the meeting owner, co-host, or an admin can manage host schedules',
+      )
     }
   }
 }

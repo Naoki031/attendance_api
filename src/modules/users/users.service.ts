@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
@@ -14,9 +15,12 @@ import { UpdateUserDto } from './dto/update-user.dto'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
 import { StorageService } from '@/modules/storage/storage.service'
 import { FirebaseService } from '@/modules/firebase/firebase.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name)
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -24,6 +28,7 @@ export class UsersService {
     private readonly userGroupPermissionRepository: Repository<UserGroupPermission>,
     private readonly storageService: StorageService,
     private readonly firebaseService: FirebaseService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -33,33 +38,43 @@ export class UsersService {
    * @returns {Promise<User>} A promise that resolves to the created user.
    */
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const existing = await this.userRepository.findOne({ where: { email: createUserDto.email } })
+    try {
+      const existing = await this.userRepository.findOne({ where: { email: createUserDto.email } })
 
-    if (existing) {
-      throw new ConflictException('Email already taken')
+      if (existing) {
+        throw new ConflictException('Email already taken')
+      }
+
+      const { is_active, password, permission_group_ids, ...rest } = createUserDto
+      const hashedPassword = await bcrypt.hash(password, parseInt(process.env.SALT_ROUNDS ?? '10'))
+      const username = createUserDto.email.split('@')[0]
+
+      const user = await this.userRepository.save({
+        ...rest,
+        username,
+        password: hashedPassword,
+        is_activated: is_active,
+      })
+
+      if (permission_group_ids?.length) {
+        await this.userGroupPermissionRepository.save(
+          permission_group_ids.map((permissionGroupId) => ({
+            user_id: user.id,
+            permission_group_id: permissionGroupId,
+          })),
+        )
+      }
+
+      return this.findOne(user.id)
+    } catch (error) {
+      this.logger.error('Failed to create user', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create user',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
     }
-
-    const { is_active, password, permission_group_ids, ...rest } = createUserDto
-    const hashedPassword = await bcrypt.hash(password, parseInt(process.env.SALT_ROUNDS ?? '10'))
-    const username = createUserDto.email.split('@')[0]
-
-    const user = await this.userRepository.save({
-      ...rest,
-      username,
-      password: hashedPassword,
-      is_activated: is_active,
-    })
-
-    if (permission_group_ids?.length) {
-      await this.userGroupPermissionRepository.save(
-        permission_group_ids.map((permissionGroupId) => ({
-          user_id: user.id,
-          permission_group_id: permissionGroupId,
-        })),
-      )
-    }
-
-    return this.findOne(user.id)
   }
 
   /**
@@ -67,17 +82,27 @@ export class UsersService {
    *
    * @returns {Promise<User[]>} A promise that resolves to an array of all users.
    */
-  findAll(): Promise<User[]> {
-    return this.userRepository.find({
-      relations: [
-        'user_group_permissions',
-        'user_group_permissions.permission_group',
-        'user_departments',
-        'user_departments.department',
-        'user_departments.company',
-        'user_work_schedules',
-      ],
-    })
+  async findAll(): Promise<User[]> {
+    try {
+      return await this.userRepository.find({
+        relations: [
+          'user_group_permissions',
+          'user_group_permissions.permission_group',
+          'user_departments',
+          'user_departments.department',
+          'user_departments.company',
+          'user_work_schedules',
+        ],
+      })
+    } catch (error) {
+      this.logger.error('Failed to find all users', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find all users',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   /**
@@ -100,94 +125,104 @@ export class UsersService {
     contractType?: string
     kycStatus?: string
   }): Promise<User[]> {
-    const queryBuilder = this.userRepository
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.user_group_permissions', 'userGroupPermission')
-      .leftJoinAndSelect('userGroupPermission.permission_group', 'permissionGroup')
-      .leftJoinAndSelect('user.user_departments', 'userDepartment')
-      .leftJoinAndSelect('userDepartment.department', 'department')
-      .leftJoinAndSelect('userDepartment.company', 'company')
-      .leftJoinAndSelect('user.user_work_schedules', 'userWorkSchedule')
+    try {
+      const queryBuilder = this.userRepository
+        .createQueryBuilder('user')
+        .leftJoinAndSelect('user.user_group_permissions', 'userGroupPermission')
+        .leftJoinAndSelect('userGroupPermission.permission_group', 'permissionGroup')
+        .leftJoinAndSelect('user.user_departments', 'userDepartment')
+        .leftJoinAndSelect('userDepartment.department', 'department')
+        .leftJoinAndSelect('userDepartment.company', 'company')
+        .leftJoinAndSelect('user.user_work_schedules', 'userWorkSchedule')
 
-    if (parameters.userId) {
-      queryBuilder.andWhere('user.id = :userId', { userId: parameters.userId })
-    }
+      if (parameters.userId) {
+        queryBuilder.andWhere('user.id = :userId', { userId: parameters.userId })
+      }
 
-    if (parameters.name) {
-      const nameLike = `%${parameters.name.toLowerCase()}%`
-      queryBuilder.andWhere(
-        "(LOWER(user.first_name) LIKE :nameLike OR LOWER(user.last_name) LIKE :nameLike OR LOWER(CONCAT(user.first_name, ' ', user.last_name)) LIKE :nameLike)",
-        { nameLike },
-      )
-    }
+      if (parameters.name) {
+        const nameLike = `%${parameters.name.toLowerCase()}%`
+        queryBuilder.andWhere(
+          "(LOWER(user.first_name) LIKE :nameLike OR LOWER(user.last_name) LIKE :nameLike OR LOWER(CONCAT(user.first_name, ' ', user.last_name)) LIKE :nameLike)",
+          { nameLike },
+        )
+      }
 
-    if (parameters.position) {
-      queryBuilder.andWhere('LOWER(user.position) LIKE :position', {
-        position: `%${parameters.position.toLowerCase()}%`,
+      if (parameters.position) {
+        queryBuilder.andWhere('LOWER(user.position) LIKE :position', {
+          position: `%${parameters.position.toLowerCase()}%`,
+        })
+      }
+
+      if (parameters.email) {
+        queryBuilder.andWhere('LOWER(user.email) LIKE :email', {
+          email: `%${parameters.email.toLowerCase()}%`,
+        })
+      }
+
+      if (parameters.departmentId) {
+        queryBuilder.andWhere(
+          'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.department_id = :departmentId)',
+          { departmentId: parameters.departmentId },
+        )
+      }
+
+      if (parameters.companyId) {
+        queryBuilder.andWhere(
+          'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id = :companyId)',
+          { companyId: parameters.companyId },
+        )
+      }
+
+      if (parameters.companyIds?.length) {
+        queryBuilder.andWhere(
+          'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id IN (:...companyIds))',
+          { companyIds: parameters.companyIds },
+        )
+      }
+
+      if (parameters.role) {
+        queryBuilder.andWhere(
+          `user.id IN (
+            SELECT ugp.user_id FROM user_group_permissions ugp
+            INNER JOIN permission_groups pg ON ugp.permission_group_id = pg.id
+            WHERE LOWER(pg.name) = :roleName
+          )`,
+          { roleName: parameters.role.toLowerCase() },
+        )
+      }
+
+      if (parameters.status === 'active') {
+        queryBuilder.andWhere('user.is_activated = :isActivated', { isActivated: true })
+      } else if (parameters.status === 'inactive') {
+        queryBuilder.andWhere('user.is_activated = :isActivated', { isActivated: false })
+      }
+
+      if (parameters.contractType) {
+        queryBuilder.andWhere('LOWER(user.contract_type) LIKE :contractType', {
+          contractType: `%${parameters.contractType.toLowerCase()}%`,
+        })
+      }
+
+      if (
+        parameters.kycStatus === 'pending' ||
+        parameters.kycStatus === 'approved' ||
+        parameters.kycStatus === 'rejected'
+      ) {
+        queryBuilder.andWhere('user.kyc_status = :kycStatus', { kycStatus: parameters.kycStatus })
+      } else if (parameters.kycStatus === 'none') {
+        queryBuilder.andWhere('user.kyc_status IS NULL')
+      }
+
+      return await queryBuilder.getMany()
+    } catch (error) {
+      this.logger.error('Failed to find users with filters', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find users with filters',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
       })
+      throw error
     }
-
-    if (parameters.email) {
-      queryBuilder.andWhere('LOWER(user.email) LIKE :email', {
-        email: `%${parameters.email.toLowerCase()}%`,
-      })
-    }
-
-    if (parameters.departmentId) {
-      queryBuilder.andWhere(
-        'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.department_id = :departmentId)',
-        { departmentId: parameters.departmentId },
-      )
-    }
-
-    if (parameters.companyId) {
-      queryBuilder.andWhere(
-        'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id = :companyId)',
-        { companyId: parameters.companyId },
-      )
-    }
-
-    if (parameters.companyIds?.length) {
-      queryBuilder.andWhere(
-        'user.id IN (SELECT ud.user_id FROM user_departments ud WHERE ud.company_id IN (:...companyIds))',
-        { companyIds: parameters.companyIds },
-      )
-    }
-
-    if (parameters.role) {
-      queryBuilder.andWhere(
-        `user.id IN (
-          SELECT ugp.user_id FROM user_group_permissions ugp
-          INNER JOIN permission_groups pg ON ugp.permission_group_id = pg.id
-          WHERE LOWER(pg.name) = :roleName
-        )`,
-        { roleName: parameters.role.toLowerCase() },
-      )
-    }
-
-    if (parameters.status === 'active') {
-      queryBuilder.andWhere('user.is_activated = :isActivated', { isActivated: true })
-    } else if (parameters.status === 'inactive') {
-      queryBuilder.andWhere('user.is_activated = :isActivated', { isActivated: false })
-    }
-
-    if (parameters.contractType) {
-      queryBuilder.andWhere('LOWER(user.contract_type) LIKE :contractType', {
-        contractType: `%${parameters.contractType.toLowerCase()}%`,
-      })
-    }
-
-    if (
-      parameters.kycStatus === 'pending' ||
-      parameters.kycStatus === 'approved' ||
-      parameters.kycStatus === 'rejected'
-    ) {
-      queryBuilder.andWhere('user.kyc_status = :kycStatus', { kycStatus: parameters.kycStatus })
-    } else if (parameters.kycStatus === 'none') {
-      queryBuilder.andWhere('user.kyc_status IS NULL')
-    }
-
-    return queryBuilder.getMany()
   }
 
   /**
@@ -199,20 +234,30 @@ export class UsersService {
    * @returns {Promise<User[]>} A promise that resolves to matching users.
    */
   async search(query: string, limit = 20): Promise<User[]> {
-    const lowerQuery = `%${query.toLowerCase()}%`
-    const numericId = /^\d+$/.test(query) ? parseInt(query, 10) : null
+    try {
+      const lowerQuery = `%${query.toLowerCase()}%`
+      const numericId = /^\d+$/.test(query) ? parseInt(query, 10) : null
 
-    const queryBuilder = this.userRepository
-      .createQueryBuilder('user')
-      .where('LOWER(user.first_name) LIKE :query', { query: lowerQuery })
-      .orWhere('LOWER(user.last_name) LIKE :query', { query: lowerQuery })
-      .orWhere('LOWER(user.email) LIKE :query', { query: lowerQuery })
+      const queryBuilder = this.userRepository
+        .createQueryBuilder('user')
+        .where('LOWER(user.first_name) LIKE :query', { query: lowerQuery })
+        .orWhere('LOWER(user.last_name) LIKE :query', { query: lowerQuery })
+        .orWhere('LOWER(user.email) LIKE :query', { query: lowerQuery })
 
-    if (numericId !== null) {
-      queryBuilder.orWhere('user.id = :id', { id: numericId })
+      if (numericId !== null) {
+        queryBuilder.orWhere('user.id = :id', { id: numericId })
+      }
+
+      return await queryBuilder.take(limit).getMany()
+    } catch (error) {
+      this.logger.error('Failed to search users', error)
+      this.errorLogsService.logError({
+        message: 'Failed to search users',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
     }
-
-    return queryBuilder.take(limit).getMany()
   }
 
   /**
@@ -223,21 +268,41 @@ export class UsersService {
    * @throws NotFoundException if no user is found with the given email address.
    */
   async findOneByEmail(email: string): Promise<User | undefined> {
-    const user = await this.userRepository.findOne({
-      where: { email },
-      relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
-    })
+    try {
+      const user = await this.userRepository.findOne({
+        where: { email },
+        relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
+      })
 
-    return user
+      return user
+    } catch (error) {
+      this.logger.error('Failed to find user by email', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find user by email',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   async findOneWithPermissions(userId: number): Promise<User | undefined> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
-    })
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+        relations: ['user_group_permissions', 'user_group_permissions.permission_group'],
+      })
 
-    return user
+      return user
+    } catch (error) {
+      this.logger.error('Failed to find user with permissions', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find user with permissions',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   /**
@@ -248,22 +313,32 @@ export class UsersService {
    * @throws {NotFoundException} If the user with the given ID is not found.
    */
   async findOne(userId: number): Promise<User> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: [
-        'user_group_permissions',
-        'user_group_permissions.permission_group',
-        'user_departments',
-        'user_departments.department',
-        'user_departments.company',
-      ],
-    })
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+        relations: [
+          'user_group_permissions',
+          'user_group_permissions.permission_group',
+          'user_departments',
+          'user_departments.department',
+          'user_departments.company',
+        ],
+      })
 
-    if (!user) {
-      throw new NotFoundException('User not found')
+      if (!user) {
+        throw new NotFoundException('User not found')
+      }
+
+      return user
+    } catch (error) {
+      this.logger.error('Failed to find user', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find user',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
     }
-
-    return user
   }
 
   /**
@@ -275,50 +350,62 @@ export class UsersService {
    * @throws {NotFoundException} If the user with the given ID is not found.
    */
   async update(userId: number, updateUserDto: UpdateUserDto): Promise<User> {
-    if (updateUserDto.email) {
-      const existing = await this.userRepository.findOne({ where: { email: updateUserDto.email } })
+    try {
+      if (updateUserDto.email) {
+        const existing = await this.userRepository.findOne({
+          where: { email: updateUserDto.email },
+        })
 
-      if (existing && existing.id !== userId) {
-        throw new ConflictException('Email already taken')
+        if (existing && existing.id !== userId) {
+          throw new ConflictException('Email already taken')
+        }
       }
-    }
 
-    const { is_active, password, permission_group_ids, ...rest } = updateUserDto
-    const updateData: Partial<User> = { ...rest }
+      const { is_active, password, permission_group_ids, ...rest } = updateUserDto
+      const updateData: Partial<User> = { ...rest }
 
-    if (password) {
-      updateData.password = await bcrypt.hash(password, parseInt(process.env.SALT_ROUNDS ?? '10'))
-    }
-
-    if (is_active !== undefined) {
-      updateData.is_activated = is_active
-    }
-
-    // MariaDB DATE columns require 'YYYY-MM-DD' format — strip ISO time portion if present
-    const toDateOnly = (value?: string) => (value ? value.substring(0, 10) : undefined)
-    if (updateData.date_of_birth) updateData.date_of_birth = toDateOnly(updateData.date_of_birth)
-    if (updateData.join_date) updateData.join_date = toDateOnly(updateData.join_date)
-    if (updateData.contract_signed_date)
-      updateData.contract_signed_date = toDateOnly(updateData.contract_signed_date)
-    if (updateData.contract_expired_date)
-      updateData.contract_expired_date = toDateOnly(updateData.contract_expired_date)
-
-    await this.userRepository.update({ id: userId }, updateData)
-
-    if (permission_group_ids !== undefined) {
-      await this.userGroupPermissionRepository.delete({ user_id: userId })
-
-      if (permission_group_ids.length) {
-        await this.userGroupPermissionRepository.save(
-          permission_group_ids.map((permissionGroupId) => ({
-            user_id: userId,
-            permission_group_id: permissionGroupId,
-          })),
-        )
+      if (password) {
+        updateData.password = await bcrypt.hash(password, parseInt(process.env.SALT_ROUNDS ?? '10'))
       }
-    }
 
-    return this.findOne(userId)
+      if (is_active !== undefined) {
+        updateData.is_activated = is_active
+      }
+
+      // MariaDB DATE columns require 'YYYY-MM-DD' format — strip ISO time portion if present
+      const toDateOnly = (value?: string) => (value ? value.substring(0, 10) : undefined)
+      if (updateData.date_of_birth) updateData.date_of_birth = toDateOnly(updateData.date_of_birth)
+      if (updateData.join_date) updateData.join_date = toDateOnly(updateData.join_date)
+      if (updateData.contract_signed_date)
+        updateData.contract_signed_date = toDateOnly(updateData.contract_signed_date)
+      if (updateData.contract_expired_date)
+        updateData.contract_expired_date = toDateOnly(updateData.contract_expired_date)
+
+      await this.userRepository.update({ id: userId }, updateData)
+
+      if (permission_group_ids !== undefined) {
+        await this.userGroupPermissionRepository.delete({ user_id: userId })
+
+        if (permission_group_ids.length) {
+          await this.userGroupPermissionRepository.save(
+            permission_group_ids.map((permissionGroupId) => ({
+              user_id: userId,
+              permission_group_id: permissionGroupId,
+            })),
+          )
+        }
+      }
+
+      return this.findOne(userId)
+    } catch (error) {
+      this.logger.error('Failed to update user', error)
+      this.errorLogsService.logError({
+        message: 'Failed to update user',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   /**
@@ -327,8 +414,18 @@ export class UsersService {
    * @param id - The ID of the user to be removed.
    * @returns A promise that resolves to the result of the delete operation.
    */
-  remove(id: number) {
-    return this.userRepository.delete({ id })
+  async remove(id: number) {
+    try {
+      return await this.userRepository.delete({ id })
+    } catch (error) {
+      this.logger.error('Failed to remove user', error)
+      this.errorLogsService.logError({
+        message: 'Failed to remove user',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   /**
@@ -336,7 +433,17 @@ export class UsersService {
    * Stores or replaces the device token used for push notifications.
    */
   async updateFcmToken(userId: number, token: string): Promise<void> {
-    await this.userRepository.update({ id: userId }, { fcm_token: token })
+    try {
+      await this.userRepository.update({ id: userId }, { fcm_token: token })
+    } catch (error) {
+      this.logger.error('Failed to update FCM token', error)
+      this.errorLogsService.logError({
+        message: 'Failed to update FCM token',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   /**
@@ -354,35 +461,45 @@ export class UsersService {
     descriptor: number[],
     imageFile: Express.Multer.File,
   ): Promise<User> {
-    const user = await this.userRepository.findOne({ where: { id: userId } })
-    if (!user) throw new NotFoundException('User not found')
+    try {
+      const user = await this.userRepository.findOne({ where: { id: userId } })
+      if (!user) throw new NotFoundException('User not found')
 
-    if (user.kyc_status === 'approved') {
-      throw new ForbiddenException('KYC is already approved and cannot be re-submitted')
+      if (user.kyc_status === 'approved') {
+        throw new ForbiddenException('KYC is already approved and cannot be re-submitted')
+      }
+
+      if (!Array.isArray(descriptor) || descriptor.length !== 128) {
+        throw new BadRequestException('Face descriptor must be an array of exactly 128 numbers')
+      }
+
+      const avatarUrl = await this.storageService.uploadImage(imageFile.buffer, 'avatars', userId)
+
+      await this.userRepository.update(
+        { id: userId },
+        {
+          face_descriptor: descriptor,
+          face_avatar_url: avatarUrl,
+          kyc_status: 'pending',
+          kyc_rejection_reason: null,
+        },
+      )
+
+      const updatedUser = await this.findOne(userId)
+
+      // Notify admins of the new KYC submission (fire-and-forget)
+      void this.notifyAdminsKycSubmitted(user)
+
+      return updatedUser
+    } catch (error) {
+      this.logger.error('Failed to register face', error)
+      this.errorLogsService.logError({
+        message: 'Failed to register face',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
     }
-
-    if (!Array.isArray(descriptor) || descriptor.length !== 128) {
-      throw new BadRequestException('Face descriptor must be an array of exactly 128 numbers')
-    }
-
-    const avatarUrl = await this.storageService.uploadImage(imageFile.buffer, 'avatars', userId)
-
-    await this.userRepository.update(
-      { id: userId },
-      {
-        face_descriptor: descriptor,
-        face_avatar_url: avatarUrl,
-        kyc_status: 'pending',
-        kyc_rejection_reason: null,
-      },
-    )
-
-    const updatedUser = await this.findOne(userId)
-
-    // Notify admins of the new KYC submission (fire-and-forget)
-    void this.notifyAdminsKycSubmitted(user)
-
-    return updatedUser
   }
 
   /**
@@ -390,17 +507,27 @@ export class UsersService {
    * Used by admins to allow the user to re-submit KYC.
    */
   async cancelKyc(userId: number): Promise<void> {
-    const user = await this.userRepository.findOne({ where: { id: userId } })
-    if (!user) throw new NotFoundException('User not found')
+    try {
+      const user = await this.userRepository.findOne({ where: { id: userId } })
+      if (!user) throw new NotFoundException('User not found')
 
-    if (!user.kyc_status) {
-      throw new BadRequestException('Cannot cancel KYC: no submission found')
+      if (!user.kyc_status) {
+        throw new BadRequestException('Cannot cancel KYC: no submission found')
+      }
+
+      await this.userRepository.update(
+        { id: userId },
+        { kyc_status: null, kyc_rejection_reason: null },
+      )
+    } catch (error) {
+      this.logger.error('Failed to cancel KYC', error)
+      this.errorLogsService.logError({
+        message: 'Failed to cancel KYC',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
     }
-
-    await this.userRepository.update(
-      { id: userId },
-      { kyc_status: null, kyc_rejection_reason: null },
-    )
   }
 
   /**
@@ -452,25 +579,35 @@ export class UsersService {
     status: 'approved' | 'rejected',
     rejectionReason?: string,
   ): Promise<User> {
-    const user = await this.userRepository.findOne({ where: { id: userId } })
-    if (!user) throw new NotFoundException('User not found')
-    if (!user.face_descriptor) throw new BadRequestException('User has not submitted KYC')
+    try {
+      const user = await this.userRepository.findOne({ where: { id: userId } })
+      if (!user) throw new NotFoundException('User not found')
+      if (!user.face_descriptor) throw new BadRequestException('User has not submitted KYC')
 
-    if (user.kyc_status !== 'pending') {
-      throw new BadRequestException(
-        `KYC status is '${user.kyc_status}', only 'pending' can be reviewed`,
+      if (user.kyc_status !== 'pending') {
+        throw new BadRequestException(
+          `KYC status is '${user.kyc_status}', only 'pending' can be reviewed`,
+        )
+      }
+
+      await this.userRepository.update(
+        { id: userId },
+        {
+          kyc_status: status,
+          kyc_rejection_reason: status === 'rejected' ? (rejectionReason ?? null) : null,
+        },
       )
+
+      return this.findOne(userId)
+    } catch (error) {
+      this.logger.error('Failed to review KYC', error)
+      this.errorLogsService.logError({
+        message: 'Failed to review KYC',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
     }
-
-    await this.userRepository.update(
-      { id: userId },
-      {
-        kyc_status: status,
-        kyc_rejection_reason: status === 'rejected' ? (rejectionReason ?? null) : null,
-      },
-    )
-
-    return this.findOne(userId)
   }
 
   /**
@@ -478,7 +615,17 @@ export class UsersService {
    * Intended to be called on every authenticated request (fire-and-forget).
    */
   async updateLastSeen(userId: number): Promise<void> {
-    await this.userRepository.update({ id: userId }, { last_seen_at: new Date() })
+    try {
+      await this.userRepository.update({ id: userId }, { last_seen_at: new Date() })
+    } catch (error) {
+      this.logger.error('Failed to update last seen', error)
+      this.errorLogsService.logError({
+        message: 'Failed to update last seen',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 
   /**
@@ -486,15 +633,25 @@ export class UsersService {
    * Only includes users who have a non-null token.
    */
   async getFcmTokensForUsers(userIds: number[]): Promise<Map<number, string>> {
-    if (userIds.length === 0) return new Map()
+    try {
+      if (userIds.length === 0) return new Map()
 
-    const users = await this.userRepository
-      .createQueryBuilder('user')
-      .select(['user.id', 'user.fcm_token'])
-      .where('user.id IN (:...userIds)', { userIds })
-      .andWhere('user.fcm_token IS NOT NULL')
-      .getMany()
+      const users = await this.userRepository
+        .createQueryBuilder('user')
+        .select(['user.id', 'user.fcm_token'])
+        .where('user.id IN (:...userIds)', { userIds })
+        .andWhere('user.fcm_token IS NOT NULL')
+        .getMany()
 
-    return new Map(users.map((user) => [user.id, user.fcm_token!]))
+      return new Map(users.map((user) => [user.id, user.fcm_token!]))
+    } catch (error) {
+      this.logger.error('Failed to get FCM tokens for users', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get FCM tokens for users',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users',
+      })
+      throw error
+    }
   }
 }

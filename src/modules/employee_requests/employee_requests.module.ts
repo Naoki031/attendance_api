@@ -13,6 +13,7 @@ import { GoogleSheetsModule } from '@/modules/google_sheets/google_sheets.module
 import { GoogleCalendarModule } from '@/modules/google_calendar/google_calendar.module'
 import { EventsModule } from '@/modules/events/events.module'
 import { AttendanceLogsModule } from '@/modules/attendance_logs/attendance_logs.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { AttendanceLogsModule } from '@/modules/attendance_logs/attendance_logs.
     GoogleCalendarModule,
     EventsModule,
     AttendanceLogsModule,
+    ErrorLogsModule,
   ],
   controllers: [EmployeeRequestsController],
   providers: [EmployeeRequestsService],

@@ -15,6 +15,7 @@ import { UsersModule } from '@/modules/users/users.module'
 import { MessageReactionsModule } from '@/modules/message_reactions/message-reactions.module'
 import { PinnedMessagesModule } from '@/modules/pinned-messages/pinned-messages.module'
 import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.mod
     MessageReactionsModule,
     PinnedMessagesModule,
     SlackChannelsModule,
+    ErrorLogsModule,
   ],
   controllers: [ChatRoomController],
   providers: [ChatService, ChatRoomService, ChatGateway],

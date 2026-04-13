@@ -17,6 +17,7 @@ import { FirebaseService } from '@/modules/firebase/firebase.service'
 import { UsersService } from '@/modules/users/users.service'
 import { MessageReactionsService } from '@/modules/message_reactions/message-reactions.service'
 import { PinnedMessagesService } from '@/modules/pinned-messages/pinned-messages.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 interface RoomUser {
   userId: number
@@ -95,6 +96,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly messageReactionsService: MessageReactionsService,
     private readonly pinnedMessagesService: PinnedMessagesService,
     private readonly slackChannelsService: SlackChannelsService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   @WebSocketServer()
@@ -132,9 +134,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       })
 
       // Mark room as read on disconnect
-      this.chatRoomService
-        .markAsRead(roomId, user.userId)
-        .catch((error) => this.logger.error('Failed to mark as read on disconnect', error))
+      this.chatRoomService.markAsRead(roomId, user.userId).catch((error) => {
+        this.logger.error('Failed to mark as read on disconnect', error)
+        this.errorLogsService.logError({
+          message: 'Failed to mark as read on disconnect',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'chat',
+        })
+      })
     }
   }
 
@@ -180,9 +187,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.to(roomKey).emit('user_joined', { userId, username, avatar, language })
 
     // Mark room as read when user opens it
-    this.chatRoomService
-      .markAsRead(roomId, userId)
-      .catch((error) => this.logger.error('Failed to mark as read on join', error))
+    this.chatRoomService.markAsRead(roomId, userId).catch((error) => {
+      this.logger.error('Failed to mark as read on join', error)
+      this.errorLogsService.logError({
+        message: 'Failed to mark as read on join',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat',
+      })
+    })
   }
 
   @SubscribeMessage('leave_room')
@@ -214,9 +226,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     })
 
     // Mark room as read when user leaves
-    this.chatRoomService
-      .markAsRead(roomId, user.userId)
-      .catch((error) => this.logger.error('Failed to mark as read on leave', error))
+    this.chatRoomService.markAsRead(roomId, user.userId).catch((error) => {
+      this.logger.error('Failed to mark as read on leave', error)
+      this.errorLogsService.logError({
+        message: 'Failed to mark as read on leave',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat',
+      })
+    })
   }
 
   @SubscribeMessage('update_language')
@@ -341,9 +358,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               .emit('message_translations_ready', { id: result.id, translations })
           }
         })
-        .catch((error) => this.logger.error('Background translation failed', error))
+        .catch((error) => {
+          this.logger.error('Background translation failed', error)
+          this.errorLogsService.logError({
+            message: 'Background translation failed',
+            stackTrace: (error as Error).stack ?? null,
+            path: 'chat',
+          })
+        })
     } catch (error) {
       this.logger.error('Failed to send message', error)
+      this.errorLogsService.logError({
+        message: `Failed to send message in room ${payload.roomUuid} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       this.slackChannelsService.sendSystemError(
         `[Chat] Failed to send message in room ${payload.roomUuid} by userId=${user.userId}: ${(error as Error).message}`,
       )
@@ -419,9 +449,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               .emit('message_translations_ready', { id: result.id, translations })
           }
         })
-        .catch((error) => this.logger.error('Background translation failed', error))
+        .catch((error) => {
+          this.logger.error('Background translation failed', error)
+          this.errorLogsService.logError({
+            message: 'Background translation failed',
+            stackTrace: (error as Error).stack ?? null,
+            path: 'chat',
+          })
+        })
     } catch (error) {
       this.logger.error('Failed to edit message', error)
+      this.errorLogsService.logError({
+        message: `Failed to edit message ${messageId} in room ${payload.roomUuid} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       this.slackChannelsService.sendSystemError(
         `[Chat] Failed to edit messageId=${messageId} in room ${payload.roomUuid} by userId=${user.userId}: ${(error as Error).message}`,
       )
@@ -460,6 +503,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(`room_${roomId}`).emit('message_deleted', { messageId: payload.messageId })
     } catch (error) {
       this.logger.error('Failed to delete message', error)
+      this.errorLogsService.logError({
+        message: `Failed to delete message ${payload.messageId} in room ${payload.roomUuid} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       const errorMessage = error instanceof Error ? error.message : 'Failed to delete message'
       client.emit('error', { message: errorMessage })
     }
@@ -553,9 +602,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               .emit('message_translations_ready', { id: result.id, translations })
           }
         })
-        .catch((error) => this.logger.error('Background translation failed', error))
+        .catch((error) => {
+          this.logger.error('Background translation failed', error)
+          this.errorLogsService.logError({
+            message: 'Background translation failed',
+            stackTrace: (error as Error).stack ?? null,
+            path: 'chat',
+          })
+        })
     } catch (error) {
       this.logger.error('Failed to send thread reply', error)
+      this.errorLogsService.logError({
+        message: `Failed to send thread reply in room ${payload.roomUuid} parentId=${payload.parentMessageId} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       this.slackChannelsService.sendSystemError(
         `[Chat] Failed to send thread reply in room ${payload.roomUuid} parentId=${payload.parentMessageId} by userId=${user.userId}: ${(error as Error).message}`,
       )
@@ -597,6 +659,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         .emit('reaction_updated', { messageId: payload.messageId, reactions })
     } catch (error) {
       this.logger.error('Failed to toggle reaction', error)
+      this.errorLogsService.logError({
+        message: `Failed to toggle reaction on message ${payload.messageId} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       client.emit('error', { message: 'Failed to toggle reaction' })
     }
   }
@@ -634,6 +702,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       })
     } catch (error) {
       this.logger.error('Failed to pin message', error)
+      this.errorLogsService.logError({
+        message: `Failed to pin message ${payload.messageId} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       client.emit('error', { message: 'Failed to pin message' })
     }
   }
@@ -677,6 +751,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       })
     } catch (error) {
       this.logger.error('Failed to unpin message', error)
+      this.errorLogsService.logError({
+        message: `Failed to unpin message ${payload.messageId} by userId=${user.userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `chat_room_${payload.roomUuid}`,
+        userId: user.userId,
+      })
       client.emit('error', { message: 'Failed to unpin message' })
     }
   }
@@ -756,7 +836,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           )
         }
       })
-      .catch((error) => this.logger.error('Failed to notify unread update', error))
+      .catch((error) => {
+        this.logger.error('Failed to notify unread update', error)
+        this.errorLogsService.logError({
+          message: 'Failed to notify unread update',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'chat',
+        })
+      })
   }
 
   /**
@@ -814,11 +901,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             }
           }
         })
-        .catch((error) => this.logger.error('Failed to notify direct room mention', error))
+        .catch((error) => {
+          this.logger.error('Failed to notify direct room mention', error)
+          this.errorLogsService.logError({
+            message: 'Failed to notify direct room mention',
+            stackTrace: (error as Error).stack ?? null,
+            path: 'chat',
+          })
+        })
     } else if (mentionedUserIds && mentionedUserIds.length > 0) {
       Promise.all(
         mentionedUserIds.filter((id) => id !== sender.userId).map((id) => notifyUser(id)),
-      ).catch((error) => this.logger.error('Failed to notify channel mention', error))
+      ).catch((error) => {
+        this.logger.error('Failed to notify channel mention', error)
+        this.errorLogsService.logError({
+          message: 'Failed to notify channel mention',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'chat',
+        })
+      })
     }
   }
 }

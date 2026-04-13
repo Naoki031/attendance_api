@@ -12,11 +12,13 @@ import { Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import moment from 'moment'
 import { MeetingsService } from './meetings.service'
+import { MeetingParticipantRole } from './entities/meeting_participant.entity'
 import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 import { SpeechService } from './speech.service'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
 import { FirebaseService } from '@/modules/firebase/firebase.service'
 import { UsersService } from '@/modules/users/users.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 // Common Whisper hallucination patterns — generated when audio is silence/noise
 const HALLUCINATION_PATTERNS = [
@@ -97,6 +99,11 @@ interface TransferHostPayload {
 
 interface LeaveMeetingPayload {
   meetingId: number
+}
+
+interface CoHostTargetPayload {
+  meetingId: number
+  targetUserId: number
 }
 
 interface SpeakerStatePayload {
@@ -182,6 +189,9 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   // meetingId → userId of current runtime host (ephemeral, reset per session)
   private readonly runtimeHosts = new Map<number, number>()
 
+  // meetingId → Set of co-host user IDs (ephemeral, reset per session)
+  private readonly coHostUserIds = new Map<number, Set<number>>()
+
   // inviteId → pending call timeout entry (auto-expires after CALL_TIMEOUT_MS)
   private static readonly CALL_TIMEOUT_MS = 30_000
 
@@ -197,6 +207,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly slackChannelsService: SlackChannelsService,
     private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
+    private readonly errorLogsService: ErrorLogsService,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -239,6 +250,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         this.meetingsService.recordLeave(meetingId, participant.userId).catch((error) => {
           this.logger.error('Failed to record participant leave', error)
+          this.errorLogsService.logError({
+            message: `Failed to record participant leave on disconnect: meetingId=${meetingId} userId=${participant.userId}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: `meeting_${meetingId}`,
+            userId: participant.userId,
+          })
         })
 
         // Notify list page of updated live participants
@@ -248,6 +265,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         if (participants.size === 0) {
           this.activeVotes.delete(meetingId)
           this.runtimeHosts.delete(meetingId)
+          this.coHostUserIds.delete(meetingId)
           this.meetingsService
             .resetToScheduled(meetingId)
             .then(() => {
@@ -259,6 +277,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
             })
             .catch((error) => {
               this.logger.error('Failed to reset meeting to scheduled on disconnect', error)
+              this.errorLogsService.logError({
+                message: `Failed to reset meeting to scheduled on disconnect: meetingId=${meetingId}`,
+                stackTrace: (error as Error).stack ?? null,
+                path: `meeting_${meetingId}`,
+              })
             })
         }
       }
@@ -266,7 +289,10 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('join_meeting')
-  handleJoinMeeting(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinMeetingPayload) {
+  async handleJoinMeeting(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: JoinMeetingPayload,
+  ) {
     // Use verified userId from JWT, not the client-supplied payload
     const userId = client.data.userId as number
     const roomName = `meeting_${payload.meetingId}`
@@ -312,6 +338,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         })
         .catch((error) => {
           this.logger.error('Failed to set meeting active', error)
+          this.errorLogsService.logError({
+            message: `Failed to set meeting active: meetingId=${payload.meetingId}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: `meeting_${payload.meetingId}`,
+          })
         })
     }
 
@@ -339,12 +370,31 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       meetingId: payload.meetingId,
     })
 
-    // Send current participant list + speaker states + runtime host to the joining user
+    // Send current participant list + speaker states + runtime host + co-hosts to the joining user
+    // Lazy-load co-hosts from DB on first join, then track ephemerally
+    if (!this.coHostUserIds.has(payload.meetingId)) {
+      const coHostIds = await this.meetingsService
+        .getCoHostUserIds(payload.meetingId)
+        .catch((error) => {
+          this.logger.error('Failed to load co-hosts for meeting', error)
+          this.errorLogsService.logError({
+            message: `Failed to load co-hosts for meeting: meetingId=${payload.meetingId}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: `meeting_${payload.meetingId}`,
+          })
+          return []
+        })
+      this.coHostUserIds.set(payload.meetingId, new Set(coHostIds))
+    }
+
+    const coHostArray = Array.from(this.coHostUserIds.get(payload.meetingId) ?? [])
+
     client.emit('meeting_state', {
       meetingId: payload.meetingId,
       participants,
       speakerStates: speakerStatesSnapshot,
       hostUserId: this.runtimeHosts.get(payload.meetingId) ?? null,
+      coHostUserIds: coHostArray,
     })
 
     // Send active votes so joining user sees ongoing votes
@@ -390,6 +440,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     this.meetingsService.recordLeave(payload.meetingId, userId).catch((error) => {
       this.logger.error('Failed to record participant leave', error)
+      this.errorLogsService.logError({
+        message: `Failed to record participant leave: meetingId=${payload.meetingId} userId=${userId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `meeting_${payload.meetingId}`,
+        userId,
+      })
     })
 
     // Notify list page of updated live participants (covers mid-session leaves)
@@ -400,6 +456,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     if (remaining === 0) {
       this.runtimeHosts.delete(payload.meetingId)
+      this.coHostUserIds.delete(payload.meetingId)
       this.meetingsService
         .resetToScheduled(payload.meetingId)
         .then(() => {
@@ -411,6 +468,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         })
         .catch((error) => {
           this.logger.error('Failed to reset meeting to scheduled', error)
+          this.errorLogsService.logError({
+            message: `Failed to reset meeting to scheduled: meetingId=${payload.meetingId}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: `meeting_${payload.meetingId}`,
+          })
         })
     }
   }
@@ -473,6 +535,31 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     this.runtimeHosts.set(payload.meetingId, payload.toUserId)
 
+    // If the new host was a co-host, remove co-host status
+    const coHosts = this.coHostUserIds.get(payload.meetingId)
+    if (coHosts?.has(payload.toUserId)) {
+      coHosts.delete(payload.toUserId)
+      this.server.to(`meeting_${payload.meetingId}`).emit('co_host_demoted', {
+        meetingId: payload.meetingId,
+        userId: payload.toUserId,
+      })
+      // Update DB role from co_host to participant (host is tracked via runtimeHosts)
+      this.meetingsService
+        .updateParticipantRole(
+          payload.meetingId,
+          payload.toUserId,
+          MeetingParticipantRole.PARTICIPANT,
+        )
+        .catch((error) => {
+          this.logger.error('Failed to update role after host transfer', error)
+          this.errorLogsService.logError({
+            message: `Failed to update role after host transfer: meetingId=${payload.meetingId} userId=${payload.toUserId}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: `meeting_${payload.meetingId}`,
+          })
+        })
+    }
+
     this.server.to(`meeting_${payload.meetingId}`).emit('host_changed', {
       meetingId: payload.meetingId,
       hostUserId: payload.toUserId,
@@ -480,6 +567,128 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     this.logger.log(
       `Host transferred in meeting ${payload.meetingId}: ${userId} → ${payload.toUserId}`,
+    )
+  }
+
+  @SubscribeMessage('promote_co_host')
+  async handlePromoteCoHost(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: CoHostTargetPayload,
+  ) {
+    const userId = client.data.userId as number
+    const runtimeHostId = this.runtimeHosts.get(payload.meetingId)
+
+    // Only the runtime host can promote to co-host
+    if (runtimeHostId !== userId) {
+      client.emit('error', { message: 'Only the host can promote to co-host' })
+      return
+    }
+
+    // Cannot promote yourself
+    if (payload.targetUserId === userId) {
+      client.emit('error', { message: 'Cannot promote yourself to co-host' })
+      return
+    }
+
+    // Target must be in the room
+    const roomParticipants = this.activeParticipants.get(payload.meetingId)
+    const targetParticipant = roomParticipants
+      ? Array.from(roomParticipants.values()).find(
+          (participant) => participant.userId === payload.targetUserId,
+        )
+      : undefined
+
+    if (!targetParticipant) {
+      client.emit('error', { message: 'Target user is not in the meeting' })
+      return
+    }
+
+    try {
+      // Update role in database
+      await this.meetingsService.updateParticipantRole(
+        payload.meetingId,
+        payload.targetUserId,
+        MeetingParticipantRole.CO_HOST,
+      )
+    } catch (error) {
+      this.logger.error('Failed to promote co-host', error)
+      this.errorLogsService.logError({
+        message: `Failed to promote co-host: meetingId=${payload.meetingId} targetUserId=${payload.targetUserId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `meeting_${payload.meetingId}`,
+      })
+      client.emit('error', { message: 'Failed to promote co-host' })
+      return
+    }
+
+    // Track ephemeral co-host state
+    if (!this.coHostUserIds.has(payload.meetingId)) {
+      this.coHostUserIds.set(payload.meetingId, new Set())
+    }
+    this.coHostUserIds.get(payload.meetingId)!.add(payload.targetUserId)
+
+    // Broadcast to all participants
+    this.server.to(`meeting_${payload.meetingId}`).emit('co_host_promoted', {
+      meetingId: payload.meetingId,
+      userId: payload.targetUserId,
+      userName: targetParticipant.username,
+    })
+
+    this.logger.log(
+      `User ${payload.targetUserId} promoted to co-host in meeting ${payload.meetingId} by ${userId}`,
+    )
+  }
+
+  @SubscribeMessage('demote_co_host')
+  async handleDemoteCoHost(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: CoHostTargetPayload,
+  ) {
+    const userId = client.data.userId as number
+    const runtimeHostId = this.runtimeHosts.get(payload.meetingId)
+
+    // Only the runtime host can demote co-host
+    if (runtimeHostId !== userId) {
+      client.emit('error', { message: 'Only the host can demote co-host' })
+      return
+    }
+
+    // Target must be a co-host
+    const coHosts = this.coHostUserIds.get(payload.meetingId)
+    if (!coHosts || !coHosts.has(payload.targetUserId)) {
+      client.emit('error', { message: 'Target user is not a co-host' })
+      return
+    }
+
+    try {
+      // Update role in database
+      await this.meetingsService.updateParticipantRole(
+        payload.meetingId,
+        payload.targetUserId,
+        MeetingParticipantRole.PARTICIPANT,
+      )
+    } catch (error) {
+      this.logger.error('Failed to demote co-host', error)
+      this.errorLogsService.logError({
+        message: `Failed to demote co-host: meetingId=${payload.meetingId} targetUserId=${payload.targetUserId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: `meeting_${payload.meetingId}`,
+      })
+      client.emit('error', { message: 'Failed to demote co-host' })
+      return
+    }
+
+    // Remove from ephemeral co-host set
+    coHosts.delete(payload.targetUserId)
+
+    // Broadcast to all participants
+    this.server.to(`meeting_${payload.meetingId}`).emit('co_host_demoted', {
+      meetingId: payload.meetingId,
+      userId: payload.targetUserId,
+    })
+
+    this.logger.log(
+      `User ${payload.targetUserId} demoted from co-host in meeting ${payload.meetingId} by ${userId}`,
     )
   }
 
@@ -495,9 +704,10 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     const runtimeHostId = this.runtimeHosts.get(payload.meetingId)
     const isRuntimeHost = runtimeHostId === userId
     const isOwner = hostId === userId
+    const isCoHost = this.coHostUserIds.get(payload.meetingId)?.has(userId) ?? false
 
-    if (hostId === null || (!isRuntimeHost && !isOwner)) {
-      client.emit('error', { message: 'Only the host can end the meeting' })
+    if (hostId === null || (!isRuntimeHost && !isOwner && !isCoHost)) {
+      client.emit('error', { message: 'Only the host or co-host can end the meeting' })
 
       return
     }
@@ -514,6 +724,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       for (const participant of participants.values()) {
         this.meetingsService.recordLeave(payload.meetingId, participant.userId).catch((error) => {
           this.logger.error('Failed to record leave on end_meeting', error)
+          this.errorLogsService.logError({
+            message: `Failed to record leave on end_meeting: meetingId=${payload.meetingId} userId=${participant.userId}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: `meeting_${payload.meetingId}`,
+            userId: participant.userId,
+          })
         })
       }
 
@@ -523,6 +739,7 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.speakerStates.get(payload.meetingId)?.clear()
     this.activeVotes.delete(payload.meetingId)
     this.runtimeHosts.delete(payload.meetingId)
+    this.coHostUserIds.delete(payload.meetingId)
 
     // Reset status to scheduled
     this.meetingsService
@@ -536,6 +753,11 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       })
       .catch((error) => {
         this.logger.error('Failed to reset meeting to scheduled after end_meeting', error)
+        this.errorLogsService.logError({
+          message: `Failed to reset meeting to scheduled after end_meeting: meetingId=${payload.meetingId}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: `meeting_${payload.meetingId}`,
+        })
       })
 
     this.logger.log(`Meeting ${payload.meetingId} ended by host ${userId}`)
@@ -725,6 +947,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
         }
       } catch (error) {
         this.logger.error('Audio chunk processing failed', error)
+        this.errorLogsService.logError({
+          message: `Audio chunk processing failed for meetingId=${meetingId} userId=${participant.userId}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: `meeting_${meetingId}`,
+          userId: participant.userId,
+        })
         this.slackChannelsService.sendSystemError(
           `[Meeting] Audio chunk processing failed for meetingId=${meetingId} userId=${participant.userId}: ${(error as Error).message}`,
         )
@@ -913,6 +1141,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       this.meetingsService.markInviteMissed(data.meetingId, userId).catch((error) => {
         this.logger.error(`Failed to mark invite ${data.inviteId} as missed`, error)
+        this.errorLogsService.logError({
+          message: `Failed to mark invite as missed: meetingId=${data.meetingId} inviteId=${data.inviteId} userId=${userId}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: `meeting_${data.meetingId}`,
+          userId,
+        })
       })
 
       // Tell the invitee they missed the call (online path via socket)

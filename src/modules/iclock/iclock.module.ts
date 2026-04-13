@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config'
 import { User } from '@/modules/users/entities/user.entity'
 import { AttendanceLogsModule } from '@/modules/attendance_logs/attendance_logs.module'
 import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 import { IclockService } from './iclock.service'
 import { IclockController } from './iclock.controller'
 
@@ -13,6 +14,7 @@ import { IclockController } from './iclock.controller'
     AttendanceLogsModule,
     ConfigModule,
     SlackChannelsModule,
+    ErrorLogsModule,
   ],
   controllers: [IclockController],
   providers: [IclockService],

@@ -1,9 +1,11 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { instanceToPlain } from 'class-transformer'
@@ -17,7 +19,10 @@ import { InviteUsersDto } from './dto/invite-users.dto'
 
 @Injectable()
 export class ChatRoomService {
+  private readonly logger = new Logger(ChatRoomService.name)
+
   constructor(
+    private readonly errorLogsService: ErrorLogsService,
     @InjectRepository(ChatRoom)
     private readonly chatRoomRepository: Repository<ChatRoom>,
     @InjectRepository(ChatRoomMember)
@@ -32,105 +37,115 @@ export class ChatRoomService {
    * and prevents duplicate 1-1 rooms between the same user pair.
    */
   async create(creatorId: number, dto: CreateChatRoomDto): Promise<ChatRoom> {
-    const isDirect = (dto.type ?? ChatRoomType.CHANNEL) === ChatRoomType.DIRECT
+    try {
+      const isDirect = (dto.type ?? ChatRoomType.CHANNEL) === ChatRoomType.DIRECT
 
-    if (isDirect) {
-      if (!dto.targetUserId) {
-        throw new BadRequestException('Direct rooms require a target user')
+      if (isDirect) {
+        if (!dto.targetUserId) {
+          throw new BadRequestException('Direct rooms require a target user')
+        }
+
+        if (dto.targetUserId === creatorId) {
+          throw new BadRequestException('Cannot create a direct room with yourself')
+        }
+
+        // Check if a direct room already exists between these two users
+        const existingRoom = await this.findDirectRoomBetweenUsers(creatorId, dto.targetUserId)
+
+        if (existingRoom) {
+          throw new BadRequestException('A direct room already exists between you and this user')
+        }
       }
 
-      if (dto.targetUserId === creatorId) {
-        throw new BadRequestException('Cannot create a direct room with yourself')
+      // Auto-generate name for direct rooms if not provided
+      let roomName = dto.name
+
+      if (isDirect && !roomName) {
+        const targetUser = await this.chatRoomMemberRepository.query(
+          `SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users WHERE id = ?`,
+          [dto.targetUserId],
+        )
+        roomName = `DM - ${targetUser[0]?.full_name ?? 'Unknown'}`
       }
 
-      // Check if a direct room already exists between these two users
-      const existingRoom = await this.findDirectRoomBetweenUsers(creatorId, dto.targetUserId)
+      const room = this.chatRoomRepository.create({
+        name: roomName,
+        description: dto.description,
+        type: dto.type ?? ChatRoomType.CHANNEL,
+        visibility: isDirect
+          ? ChatRoomVisibility.PRIVATE
+          : (dto.visibility ?? ChatRoomVisibility.PUBLIC),
+        creator_id: creatorId,
+      })
+      const saved = await this.chatRoomRepository.save(room).catch((error) => {
+        if (error?.code === 'ER_DUP_ENTRY') {
+          throw new BadRequestException('A room with this name already exists')
+        }
+        throw error
+      })
 
-      if (existingRoom) {
-        throw new BadRequestException('A direct room already exists between you and this user')
-      }
-    }
-
-    // Auto-generate name for direct rooms if not provided
-    let roomName = dto.name
-
-    if (isDirect && !roomName) {
-      const targetUser = await this.chatRoomMemberRepository.query(
-        `SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users WHERE id = ?`,
-        [dto.targetUserId],
-      )
-      roomName = `DM - ${targetUser[0]?.full_name ?? 'Unknown'}`
-    }
-
-    const room = this.chatRoomRepository.create({
-      name: roomName,
-      description: dto.description,
-      type: dto.type ?? ChatRoomType.CHANNEL,
-      visibility: isDirect
-        ? ChatRoomVisibility.PRIVATE
-        : (dto.visibility ?? ChatRoomVisibility.PUBLIC),
-      creator_id: creatorId,
-    })
-    const saved = await this.chatRoomRepository.save(room).catch((error) => {
-      if (error?.code === 'ER_DUP_ENTRY') {
-        throw new BadRequestException('A room with this name already exists')
-      }
-      throw error
-    })
-
-    await this.chatRoomMemberRepository.save({
-      room_id: saved.id,
-      user_id: creatorId,
-      role: ChatRoomMemberRole.ADMIN,
-    })
-
-    // For direct rooms, auto-add the target user as member
-    if (isDirect && dto.targetUserId) {
       await this.chatRoomMemberRepository.save({
         room_id: saved.id,
-        user_id: dto.targetUserId,
-        role: ChatRoomMemberRole.MEMBER,
+        user_id: creatorId,
+        role: ChatRoomMemberRole.ADMIN,
       })
-    }
 
-    // For channel rooms, add invited members
-    if (!isDirect) {
-      const userIds = new Set<number>()
-
-      // Add individually selected users
-      if (dto.memberUserIds) {
-        for (const userId of dto.memberUserIds) {
-          if (userId !== creatorId) userIds.add(userId)
-        }
-      }
-
-      // Resolve group members and merge
-      if (dto.groupIds && dto.groupIds.length > 0) {
-        const groupUserRows = await this.chatRoomMemberRepository.query(
-          `SELECT DISTINCT user_id FROM user_groups WHERE group_id IN (${dto.groupIds.map(() => '?').join(',')})`,
-          dto.groupIds,
-        )
-
-        for (const row of groupUserRows) {
-          if (row.user_id !== creatorId) userIds.add(row.user_id)
-        }
-      }
-
-      if (userIds.size > 0) {
-        const members = Array.from(userIds).map((userId) => ({
+      // For direct rooms, auto-add the target user as member
+      if (isDirect && dto.targetUserId) {
+        await this.chatRoomMemberRepository.save({
           room_id: saved.id,
-          user_id: userId,
+          user_id: dto.targetUserId,
           role: ChatRoomMemberRole.MEMBER,
-        }))
-        await this.chatRoomMemberRepository.save(members)
+        })
       }
-    }
 
-    // Reload with relations for complete response
-    return this.chatRoomRepository.findOne({
-      where: { id: saved.id },
-      relations: ['creator'],
-    }) as Promise<ChatRoom>
+      // For channel rooms, add invited members
+      if (!isDirect) {
+        const userIds = new Set<number>()
+
+        // Add individually selected users
+        if (dto.memberUserIds) {
+          for (const userId of dto.memberUserIds) {
+            if (userId !== creatorId) userIds.add(userId)
+          }
+        }
+
+        // Resolve group members and merge
+        if (dto.groupIds && dto.groupIds.length > 0) {
+          const groupUserRows = await this.chatRoomMemberRepository.query(
+            `SELECT DISTINCT user_id FROM user_groups WHERE group_id IN (${dto.groupIds.map(() => '?').join(',')})`,
+            dto.groupIds,
+          )
+
+          for (const row of groupUserRows) {
+            if (row.user_id !== creatorId) userIds.add(row.user_id)
+          }
+        }
+
+        if (userIds.size > 0) {
+          const members = Array.from(userIds).map((userId) => ({
+            room_id: saved.id,
+            user_id: userId,
+            role: ChatRoomMemberRole.MEMBER,
+          }))
+          await this.chatRoomMemberRepository.save(members)
+        }
+      }
+
+      // Reload with relations for complete response
+      return this.chatRoomRepository.findOne({
+        where: { id: saved.id },
+        relations: ['creator'],
+      }) as Promise<ChatRoom>
+    } catch (error) {
+      this.logger.error('Failed to create chat room', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create chat room',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
+    }
   }
 
   /**
@@ -143,40 +158,50 @@ export class ChatRoomService {
     meetingUuid: string,
     requesterId: number,
   ): Promise<ChatRoom> {
-    let room = await this.chatRoomRepository.findOne({ where: { meeting_id: meetingId } })
+    try {
+      let room = await this.chatRoomRepository.findOne({ where: { meeting_id: meetingId } })
 
-    if (!room) {
-      const newRoom = this.chatRoomRepository.create({
-        name: `meeting-${meetingUuid}`,
-        type: ChatRoomType.CHANNEL,
-        visibility: ChatRoomVisibility.PRIVATE,
-        creator_id: requesterId,
-        meeting_id: meetingId,
-      })
-      room = await this.chatRoomRepository.save(newRoom)
+      if (!room) {
+        const newRoom = this.chatRoomRepository.create({
+          name: `meeting-${meetingUuid}`,
+          type: ChatRoomType.CHANNEL,
+          visibility: ChatRoomVisibility.PRIVATE,
+          creator_id: requesterId,
+          meeting_id: meetingId,
+        })
+        room = await this.chatRoomRepository.save(newRoom)
 
-      await this.chatRoomMemberRepository.save({
-        room_id: room.id,
-        user_id: requesterId,
-        role: ChatRoomMemberRole.ADMIN,
-      })
-    } else {
-      // Ensure the requesting user is a member (they may be a new participant)
-      const existing = await this.chatRoomMemberRepository.findOneBy({
-        room_id: room.id,
-        user_id: requesterId,
-      })
-
-      if (!existing) {
         await this.chatRoomMemberRepository.save({
           room_id: room.id,
           user_id: requesterId,
-          role: ChatRoomMemberRole.MEMBER,
+          role: ChatRoomMemberRole.ADMIN,
         })
-      }
-    }
+      } else {
+        // Ensure the requesting user is a member (they may be a new participant)
+        const existing = await this.chatRoomMemberRepository.findOneBy({
+          room_id: room.id,
+          user_id: requesterId,
+        })
 
-    return room
+        if (!existing) {
+          await this.chatRoomMemberRepository.save({
+            room_id: room.id,
+            user_id: requesterId,
+            role: ChatRoomMemberRole.MEMBER,
+          })
+        }
+      }
+
+      return room
+    } catch (error) {
+      this.logger.error('Failed to find or create meeting room', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find or create meeting room',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
+    }
   }
 
   /**
@@ -214,110 +239,132 @@ export class ChatRoomService {
    * Returns all rooms the user is a member of.
    */
   async findMyRooms(userId: number) {
-    const memberships = await this.chatRoomMemberRepository.find({
-      where: { user_id: userId },
-      relations: ['room', 'room.creator'],
-    })
-
-    // Exclude meeting rooms — they are only accessible from within the meeting page.
-    // Also exclude rooms with names starting with "meeting-" (created before meeting_id column existed).
-    const isMeetingRoom = (room: ChatRoom) =>
-      Boolean(room.meeting_id) || room.name.startsWith('meeting-')
-
-    const rooms = memberships
-      .map((membership) => membership.room!)
-      .filter((room) => Boolean(room) && !isMeetingRoom(room))
-
-    // Fetch member counts for all rooms in one query
-    const roomIds = rooms.map((room) => room.id)
-    const memberCountMap = new Map<number, number>()
-
-    if (roomIds.length > 0) {
-      const countRows: { room_id: number; count: string }[] =
-        await this.chatRoomMemberRepository.query(
-          `SELECT room_id, COUNT(*) as count FROM chat_room_members WHERE room_id IN (${roomIds.map(() => '?').join(',')}) GROUP BY room_id`,
-          roomIds,
-        )
-
-      for (const row of countRows) {
-        memberCountMap.set(Number(row.room_id), Number(row.count))
-      }
-    }
-
-    // For direct rooms, attach the other user as direct_user
-    const directRoomIds = rooms
-      .filter((room) => room.type === ChatRoomType.DIRECT)
-      .map((room) => room.id)
-
-    const directUserMap = new Map<
-      number,
-      { id: number; full_name: string; email: string; avatar?: string }
-    >()
-
-    if (directRoomIds.length > 0) {
-      const allMembers = await this.chatRoomMemberRepository.find({
-        where: directRoomIds.map((roomId) => ({ room_id: roomId })),
-        relations: ['user'],
+    try {
+      const memberships = await this.chatRoomMemberRepository.find({
+        where: { user_id: userId },
+        relations: ['room', 'room.creator'],
       })
 
-      for (const member of allMembers) {
-        if (!member.user || member.user.id === userId) continue
-        directUserMap.set(member.room_id, {
-          id: member.user.id,
-          full_name: `${member.user.first_name} ${member.user.last_name}`,
-          email: member.user.email,
-          avatar: member.user.avatar,
+      // Exclude meeting rooms — they are only accessible from within the meeting page.
+      // Also exclude rooms with names starting with "meeting-" (created before meeting_id column existed).
+      const isMeetingRoom = (room: ChatRoom) =>
+        Boolean(room.meeting_id) || room.name.startsWith('meeting-')
+
+      const rooms = memberships
+        .map((membership) => membership.room!)
+        .filter((room) => Boolean(room) && !isMeetingRoom(room))
+
+      // Fetch member counts for all rooms in one query
+      const roomIds = rooms.map((room) => room.id)
+      const memberCountMap = new Map<number, number>()
+
+      if (roomIds.length > 0) {
+        const countRows: { room_id: number; count: string }[] =
+          await this.chatRoomMemberRepository.query(
+            `SELECT room_id, COUNT(*) as count FROM chat_room_members WHERE room_id IN (${roomIds.map(() => '?').join(',')}) GROUP BY room_id`,
+            roomIds,
+          )
+
+        for (const row of countRows) {
+          memberCountMap.set(Number(row.room_id), Number(row.count))
+        }
+      }
+
+      // For direct rooms, attach the other user as direct_user
+      const directRoomIds = rooms
+        .filter((room) => room.type === ChatRoomType.DIRECT)
+        .map((room) => room.id)
+
+      const directUserMap = new Map<
+        number,
+        { id: number; full_name: string; email: string; avatar?: string }
+      >()
+
+      if (directRoomIds.length > 0) {
+        const allMembers = await this.chatRoomMemberRepository.find({
+          where: directRoomIds.map((roomId) => ({ room_id: roomId })),
+          relations: ['user'],
         })
+
+        for (const member of allMembers) {
+          if (!member.user || member.user.id === userId) continue
+          directUserMap.set(member.room_id, {
+            id: member.user.id,
+            full_name: `${member.user.first_name} ${member.user.last_name}`,
+            email: member.user.email,
+            avatar: member.user.avatar,
+          })
+        }
       }
+
+      const previewMemberMap = await this.fetchPreviewMembers(roomIds)
+
+      // Convert to plain objects and attach direct_user + member_count + preview_members
+      return rooms.map((room) => {
+        const plain = instanceToPlain(room) as Record<string, unknown>
+
+        if (room.type === ChatRoomType.DIRECT) {
+          plain.direct_user = directUserMap.get(room.id) ?? null
+        }
+
+        plain.member_count = memberCountMap.get(room.id) ?? 0
+        plain.preview_members = previewMemberMap.get(room.id) ?? []
+
+        return plain
+      })
+    } catch (error) {
+      this.logger.error('Failed to find my rooms', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find my rooms',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
     }
-
-    const previewMemberMap = await this.fetchPreviewMembers(roomIds)
-
-    // Convert to plain objects and attach direct_user + member_count + preview_members
-    return rooms.map((room) => {
-      const plain = instanceToPlain(room) as Record<string, unknown>
-
-      if (room.type === ChatRoomType.DIRECT) {
-        plain.direct_user = directUserMap.get(room.id) ?? null
-      }
-
-      plain.member_count = memberCountMap.get(room.id) ?? 0
-      plain.preview_members = previewMemberMap.get(room.id) ?? []
-
-      return plain
-    })
   }
 
   /**
    * Returns all public rooms (for discovery).
    */
   async findPublicRooms() {
-    const rooms = await this.chatRoomRepository
-      .createQueryBuilder('room')
-      .leftJoinAndSelect('room.creator', 'creator')
-      .where('room.visibility = :visibility', { visibility: ChatRoomVisibility.PUBLIC })
-      .andWhere('room.meeting_id IS NULL')
-      .andWhere('room.name NOT LIKE :prefix', { prefix: 'meeting-%' })
-      .orderBy('room.created_at', 'DESC')
-      .getMany()
+    try {
+      const rooms = await this.chatRoomRepository
+        .createQueryBuilder('room')
+        .leftJoinAndSelect('room.creator', 'creator')
+        .where('room.visibility = :visibility', { visibility: ChatRoomVisibility.PUBLIC })
+        .andWhere('room.meeting_id IS NULL')
+        .andWhere('room.name NOT LIKE :prefix', { prefix: 'meeting-%' })
+        .orderBy('room.created_at', 'DESC')
+        .getMany()
 
-    if (rooms.length === 0) return rooms
+      if (rooms.length === 0) return rooms
 
-    const roomIds = rooms.map((room) => room.id)
-    const countRows: { room_id: number; count: string }[] =
-      await this.chatRoomMemberRepository.query(
-        `SELECT room_id, COUNT(*) as count FROM chat_room_members WHERE room_id IN (${roomIds.map(() => '?').join(',')}) GROUP BY room_id`,
-        roomIds,
+      const roomIds = rooms.map((room) => room.id)
+      const countRows: { room_id: number; count: string }[] =
+        await this.chatRoomMemberRepository.query(
+          `SELECT room_id, COUNT(*) as count FROM chat_room_members WHERE room_id IN (${roomIds.map(() => '?').join(',')}) GROUP BY room_id`,
+          roomIds,
+        )
+
+      const memberCountMap = new Map(
+        countRows.map((row) => [Number(row.room_id), Number(row.count)]),
       )
+      const previewMemberMap = await this.fetchPreviewMembers(roomIds)
 
-    const memberCountMap = new Map(countRows.map((row) => [Number(row.room_id), Number(row.count)]))
-    const previewMemberMap = await this.fetchPreviewMembers(roomIds)
-
-    return rooms.map((room) => ({
-      ...instanceToPlain(room),
-      member_count: memberCountMap.get(room.id) ?? 0,
-      preview_members: previewMemberMap.get(room.id) ?? [],
-    }))
+      return rooms.map((room) => ({
+        ...instanceToPlain(room),
+        member_count: memberCountMap.get(room.id) ?? 0,
+        preview_members: previewMemberMap.get(room.id) ?? [],
+      }))
+    } catch (error) {
+      this.logger.error('Failed to find public rooms', error)
+      this.errorLogsService.logError({
+        message: 'Failed to find public rooms',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
+    }
   }
 
   /**
@@ -594,27 +641,37 @@ export class ChatRoomService {
    * Keyed by room UUID for client convenience.
    */
   async getUnreadCounts(userId: number): Promise<Record<string, number>> {
-    const results = await this.chatRoomMemberRepository.query(
-      `SELECT cr.uuid AS roomUuid, CAST(COUNT(m.id) AS UNSIGNED) AS unreadCount
-       FROM chat_room_members crm
-       JOIN chat_rooms cr ON cr.id = crm.room_id
-       LEFT JOIN messages m ON m.room_id = cr.id
-         AND m.user_id != ?
-         AND (crm.last_read_at IS NULL OR m.created_at > crm.last_read_at)
-       WHERE crm.user_id = ?
-         AND cr.deleted_at IS NULL
-         AND cr.meeting_id IS NULL
-       GROUP BY cr.uuid`,
-      [userId, userId],
-    )
+    try {
+      const results = await this.chatRoomMemberRepository.query(
+        `SELECT cr.uuid AS roomUuid, CAST(COUNT(m.id) AS UNSIGNED) AS unreadCount
+         FROM chat_room_members crm
+         JOIN chat_rooms cr ON cr.id = crm.room_id
+         LEFT JOIN messages m ON m.room_id = cr.id
+           AND m.user_id != ?
+           AND (crm.last_read_at IS NULL OR m.created_at > crm.last_read_at)
+         WHERE crm.user_id = ?
+           AND cr.deleted_at IS NULL
+           AND cr.meeting_id IS NULL
+         GROUP BY cr.uuid`,
+        [userId, userId],
+      )
 
-    const counts: Record<string, number> = {}
+      const counts: Record<string, number> = {}
 
-    for (const row of results) {
-      counts[row.roomUuid] = Number(row.unreadCount)
+      for (const row of results) {
+        counts[row.roomUuid] = Number(row.unreadCount)
+      }
+
+      return counts
+    } catch (error) {
+      this.logger.error('Failed to get unread counts', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get unread counts',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
     }
-
-    return counts
   }
 
   /**
@@ -644,48 +701,58 @@ export class ChatRoomService {
    * Returns only the latest top-level message per room (excludes thread replies).
    */
   async getRecentReadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
-    const results = await this.chatRoomMemberRepository.query(
-      `SELECT m.id, m.content, m.created_at, m.parent_id AS parentId,
-              cr.uuid AS roomUuid, cr.name AS roomName, cr.type AS roomType,
-              m.user_id AS senderId,
-              CONCAT(u.first_name, ' ', u.last_name) AS senderName,
-              u.avatar AS senderAvatar
-       FROM chat_room_members crm
-       JOIN chat_rooms cr ON cr.id = crm.room_id
-       JOIN messages m ON m.room_id = cr.id
-         AND m.user_id != ?
-         AND m.parent_id IS NULL
-         AND crm.last_read_at IS NOT NULL
-         AND m.created_at <= crm.last_read_at
-       JOIN users u ON u.id = m.user_id
-       WHERE crm.user_id = ?
-         AND cr.deleted_at IS NULL
-         AND cr.meeting_id IS NULL
-         AND m.id = (
-           SELECT MAX(m2.id) FROM messages m2
-           WHERE m2.room_id = cr.id
-             AND m2.user_id != ?
-             AND m2.parent_id IS NULL
-             AND crm.last_read_at IS NOT NULL
-             AND m2.created_at <= crm.last_read_at
-         )
-       ORDER BY m.created_at DESC
-       LIMIT ?`,
-      [userId, userId, userId, limit],
-    )
+    try {
+      const results = await this.chatRoomMemberRepository.query(
+        `SELECT m.id, m.content, m.created_at, m.parent_id AS parentId,
+                cr.uuid AS roomUuid, cr.name AS roomName, cr.type AS roomType,
+                m.user_id AS senderId,
+                CONCAT(u.first_name, ' ', u.last_name) AS senderName,
+                u.avatar AS senderAvatar
+         FROM chat_room_members crm
+         JOIN chat_rooms cr ON cr.id = crm.room_id
+         JOIN messages m ON m.room_id = cr.id
+           AND m.user_id != ?
+           AND m.parent_id IS NULL
+           AND crm.last_read_at IS NOT NULL
+           AND m.created_at <= crm.last_read_at
+         JOIN users u ON u.id = m.user_id
+         WHERE crm.user_id = ?
+           AND cr.deleted_at IS NULL
+           AND cr.meeting_id IS NULL
+           AND m.id = (
+             SELECT MAX(m2.id) FROM messages m2
+             WHERE m2.room_id = cr.id
+               AND m2.user_id != ?
+               AND m2.parent_id IS NULL
+               AND crm.last_read_at IS NOT NULL
+               AND m2.created_at <= crm.last_read_at
+           )
+         ORDER BY m.created_at DESC
+         LIMIT ?`,
+        [userId, userId, userId, limit],
+      )
 
-    return results.map((row: Record<string, unknown>) => ({
-      id: Number(row.id),
-      content: String(row.content),
-      createdAt: new Date(row.created_at as string | Date).toISOString(),
-      parentId: row.parentId ? Number(row.parentId) : null,
-      roomUuid: String(row.roomUuid),
-      roomName: String(row.roomName),
-      roomType: String(row.roomType),
-      senderId: Number(row.senderId),
-      senderName: String(row.senderName),
-      senderAvatar: (row.senderAvatar as string) ?? null,
-    }))
+      return results.map((row: Record<string, unknown>) => ({
+        id: Number(row.id),
+        content: String(row.content),
+        createdAt: new Date(row.created_at as string | Date).toISOString(),
+        parentId: row.parentId ? Number(row.parentId) : null,
+        roomUuid: String(row.roomUuid),
+        roomName: String(row.roomName),
+        roomType: String(row.roomType),
+        senderId: Number(row.senderId),
+        senderName: String(row.senderName),
+        senderAvatar: (row.senderAvatar as string) ?? null,
+      }))
+    } catch (error) {
+      this.logger.error('Failed to get recent read messages', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get recent read messages',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
+    }
   }
 
   /**
@@ -693,46 +760,56 @@ export class ChatRoomService {
    * Returns only the latest top-level message per room (excludes thread replies).
    */
   async getUnreadMessages(userId: number, limit = 20): Promise<UnreadMessageResult[]> {
-    const results = await this.chatRoomMemberRepository.query(
-      `SELECT m.id, m.content, m.created_at, m.parent_id AS parentId,
-              cr.uuid AS roomUuid, cr.name AS roomName, cr.type AS roomType,
-              m.user_id AS senderId,
-              CONCAT(u.first_name, ' ', u.last_name) AS senderName,
-              u.avatar AS senderAvatar
-       FROM chat_room_members crm
-       JOIN chat_rooms cr ON cr.id = crm.room_id
-       JOIN messages m ON m.room_id = cr.id
-         AND m.user_id != ?
-         AND m.parent_id IS NULL
-         AND (crm.last_read_at IS NULL OR m.created_at > crm.last_read_at)
-       JOIN users u ON u.id = m.user_id
-       WHERE crm.user_id = ?
-         AND cr.deleted_at IS NULL
-         AND cr.meeting_id IS NULL
-         AND m.id = (
-           SELECT MAX(m2.id) FROM messages m2
-           WHERE m2.room_id = cr.id
-             AND m2.user_id != ?
-             AND m2.parent_id IS NULL
-             AND (crm.last_read_at IS NULL OR m2.created_at > crm.last_read_at)
-         )
-       ORDER BY m.created_at DESC
-       LIMIT ?`,
-      [userId, userId, userId, limit],
-    )
+    try {
+      const results = await this.chatRoomMemberRepository.query(
+        `SELECT m.id, m.content, m.created_at, m.parent_id AS parentId,
+                cr.uuid AS roomUuid, cr.name AS roomName, cr.type AS roomType,
+                m.user_id AS senderId,
+                CONCAT(u.first_name, ' ', u.last_name) AS senderName,
+                u.avatar AS senderAvatar
+         FROM chat_room_members crm
+         JOIN chat_rooms cr ON cr.id = crm.room_id
+         JOIN messages m ON m.room_id = cr.id
+           AND m.user_id != ?
+           AND m.parent_id IS NULL
+           AND (crm.last_read_at IS NULL OR m.created_at > crm.last_read_at)
+         JOIN users u ON u.id = m.user_id
+         WHERE crm.user_id = ?
+           AND cr.deleted_at IS NULL
+           AND cr.meeting_id IS NULL
+           AND m.id = (
+             SELECT MAX(m2.id) FROM messages m2
+             WHERE m2.room_id = cr.id
+               AND m2.user_id != ?
+               AND m2.parent_id IS NULL
+               AND (crm.last_read_at IS NULL OR m2.created_at > crm.last_read_at)
+           )
+         ORDER BY m.created_at DESC
+         LIMIT ?`,
+        [userId, userId, userId, limit],
+      )
 
-    return results.map((row: Record<string, unknown>) => ({
-      id: Number(row.id),
-      content: String(row.content),
-      createdAt: new Date(row.created_at as string | Date).toISOString(),
-      parentId: row.parentId ? Number(row.parentId) : null,
-      roomUuid: String(row.roomUuid),
-      roomName: String(row.roomName),
-      roomType: String(row.roomType),
-      senderId: Number(row.senderId),
-      senderName: String(row.senderName),
-      senderAvatar: (row.senderAvatar as string) ?? null,
-    }))
+      return results.map((row: Record<string, unknown>) => ({
+        id: Number(row.id),
+        content: String(row.content),
+        createdAt: new Date(row.created_at as string | Date).toISOString(),
+        parentId: row.parentId ? Number(row.parentId) : null,
+        roomUuid: String(row.roomUuid),
+        roomName: String(row.roomName),
+        roomType: String(row.roomType),
+        senderId: Number(row.senderId),
+        senderName: String(row.senderName),
+        senderAvatar: (row.senderAvatar as string) ?? null,
+      }))
+    } catch (error) {
+      this.logger.error('Failed to get unread messages', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get unread messages',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'chat_room',
+      })
+      throw error
+    }
   }
 
   /**

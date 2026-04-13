@@ -15,6 +15,7 @@ import { GoogleSheetsModule } from '@/modules/google_sheets/google_sheets.module
 import { FaceModule } from '@/modules/face/face.module'
 import { StorageModule } from '@/modules/storage/storage.module'
 import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { SlackChannelsModule } from '@/modules/slack_channels/slack_channels.mod
     FaceModule,
     StorageModule,
     SlackChannelsModule,
+    ErrorLogsModule,
   ],
   controllers: [AttendanceLogsController],
   providers: [AttendanceLogsService],

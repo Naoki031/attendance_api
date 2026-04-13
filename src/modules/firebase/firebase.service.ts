@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import * as admin from 'firebase-admin'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class FirebaseService {
   private readonly logger = new Logger(FirebaseService.name)
   private readonly app: admin.app.App | null = null
 
-  constructor() {
+  constructor(private readonly errorLogsService: ErrorLogsService) {
     const projectId = process.env.FIREBASE_PROJECT_ID
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
     const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
@@ -29,6 +30,11 @@ export class FirebaseService {
         )
     } catch (error) {
       this.logger.error('Failed to initialize Firebase app', error)
+      this.errorLogsService.logError({
+        message: 'Failed to initialize Firebase app',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'firebase',
+      })
     }
   }
 
@@ -83,6 +89,11 @@ export class FirebaseService {
     } catch (error) {
       // Log but do not throw — FCM errors must not block message delivery
       this.logger.warn(`Failed to send FCM to token ${token.slice(0, 20)}...: ${error}`)
+      this.errorLogsService.logError({
+        message: `Failed to send FCM to token ${token.slice(0, 20)}...`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'firebase',
+      })
     }
   }
 

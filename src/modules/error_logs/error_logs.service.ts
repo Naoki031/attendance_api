@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, LessThan, In } from 'typeorm'
 import { ErrorLog } from './entities/error_log.entity'
+import type { ErrorLogLevel } from './entities/error_log.entity'
 import { QueryErrorLogDto } from './dto/query-error_log.dto'
 import moment from 'moment'
 
@@ -153,5 +154,34 @@ export class ErrorLogsService {
     })
 
     return result.affected ?? 0
+  }
+
+  /**
+   * Persists an error log entry (fire-and-forget). Used by non-HTTP contexts
+   * like WebSocket gateways that are not caught by AllExceptionsFilter.
+   */
+  logError(data: {
+    level?: ErrorLogLevel
+    message: string
+    stackTrace?: string | null
+    path?: string
+    userId?: number | null
+  }): void {
+    const MAX = 500
+    this.errorLogRepository
+      .insert({
+        level: data.level ?? 'error',
+        message: data.message.substring(0, MAX),
+        stack_trace: data.stackTrace ?? null,
+        path: data.path?.substring(0, 500) ?? null,
+        user_id: data.userId ?? null,
+        is_resolved: false,
+      })
+      .catch((databaseError) => {
+        this.logger.error(
+          'Failed to save error log',
+          databaseError instanceof Error ? databaseError.message : String(databaseError),
+        )
+      })
   }
 }

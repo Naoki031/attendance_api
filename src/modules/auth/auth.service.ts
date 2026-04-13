@@ -14,6 +14,7 @@ import { User } from '@/modules/users/entities/user.entity'
 import { UpdateProfileDto } from './dto/update-profile.dto'
 import { ChangePasswordDto } from './dto/change-password.dto'
 import { UpdateAvatarDto } from './dto/update-avatar.dto'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class AuthService {
@@ -22,6 +23,7 @@ export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -157,6 +159,11 @@ export class AuthService {
       await fs.mkdir(uploadDirectory, { recursive: true })
     } catch (error) {
       this.logger.error('Failed to create avatar upload directory:', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create avatar upload directory',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'auth',
+      })
     }
 
     // Delete old avatar file if exists — validate path stays within uploads/avatars to prevent traversal

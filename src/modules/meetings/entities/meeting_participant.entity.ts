@@ -12,6 +12,7 @@ import { Meeting } from './meeting.entity'
 
 export enum MeetingParticipantRole {
   HOST = 'host',
+  CO_HOST = 'co_host',
   PARTICIPANT = 'participant',
 }
 

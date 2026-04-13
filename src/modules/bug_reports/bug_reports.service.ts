@@ -8,6 +8,7 @@ import { CreateBugReportDto } from './dto/create-bug_report.dto'
 import { UpdateBugReportDto } from './dto/update-bug_report.dto'
 import { User } from '@/modules/users/entities/user.entity'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { UserDepartment } from '@/modules/user_departments/entities/user_department.entity'
 
 @Injectable()
@@ -21,6 +22,7 @@ export class BugReportsService {
     @InjectRepository(UserDepartment)
     private readonly userDepartmentRepository: Repository<UserDepartment>,
     private readonly slackChannelsService: SlackChannelsService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {
     this.ensureUploadDir()
   }
@@ -41,6 +43,11 @@ export class BugReportsService {
       await fs.mkdir(this.uploadDir, { recursive: true })
     } catch (error) {
       this.logger.error('Failed to create upload directory:', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create upload directory',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'bug_reports',
+      })
     }
   }
 
@@ -61,6 +68,11 @@ export class BugReportsService {
       return `/uploads/bug_reports/${filename}`
     } catch (error) {
       this.logger.error('Failed to save screenshot:', error)
+      this.errorLogsService.logError({
+        message: 'Failed to save screenshot',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'bug_reports',
+      })
       return null
     }
   }
@@ -80,6 +92,11 @@ export class BugReportsService {
       return this.findOne(created.id)
     } catch (error) {
       this.logger.error('Failed to create bug report:', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create bug report',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'bug_reports',
+      })
       const companyId = await this.getUserCompanyId(user.id)
       await this.slackChannelsService.sendError(
         `❌ **Failed to create bug report**\n*User:* ${user.full_name} (${user.email})\n*Title:* ${createDto.title}\n*Error:* ${error}`,
@@ -120,6 +137,11 @@ export class BugReportsService {
       return this.findOne(id)
     } catch (error) {
       this.logger.error('Failed to update bug report:', error)
+      this.errorLogsService.logError({
+        message: `Failed to update bug report id=${id}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'bug_reports',
+      })
       const report = await this.findOne(id).catch(() => null)
       const companyId = report ? await this.getUserCompanyId(report.user_id) : null
       await this.slackChannelsService.sendError(
@@ -141,12 +163,22 @@ export class BugReportsService {
           await fs.unlink(filepath)
         } catch (error) {
           this.logger.warn(`Failed to delete screenshot ${filepath}:`, error)
+          this.errorLogsService.logError({
+            message: `Failed to delete screenshot ${filepath}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: 'bug_reports',
+          })
         }
       }
 
       await this.bugReportRepository.delete({ id })
     } catch (error) {
       this.logger.error('Failed to delete bug report:', error)
+      this.errorLogsService.logError({
+        message: `Failed to delete bug report id=${id}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'bug_reports',
+      })
       const companyId = await this.getUserCompanyId(id)
       await this.slackChannelsService.sendError(
         `❌ **Failed to delete bug report**\n*Report ID:* ${id}\n*Error:* ${error}`,

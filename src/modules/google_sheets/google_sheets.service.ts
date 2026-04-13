@@ -10,6 +10,7 @@ import {
   REQUEST_TYPE_ALL,
 } from './entities/company_google_sheet.entity'
 import { SlackChannelsService } from '@/modules/slack_channels/slack_channels.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 /** Default column layout — mirrors the original hardcoded A–N mapping */
 export const DEFAULT_COLUMN_CONFIG: ColumnConfigItem[] = [
@@ -51,6 +52,7 @@ export class GoogleSheetsService {
     @InjectRepository(CompanyGoogleSheet)
     private readonly companyGoogleSheetRepository: Repository<CompanyGoogleSheet>,
     private readonly slackChannelsService: SlackChannelsService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {
     this.initialize()
   }
@@ -78,6 +80,11 @@ export class GoogleSheetsService {
       this.sheets = google.sheets({ version: 'v4', auth })
     } catch (error) {
       this.logger.error('Failed to initialize Google Sheets client', error)
+      this.errorLogsService.logError({
+        message: 'Failed to initialize Google Sheets client',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'google_sheets',
+      })
     }
   }
 
@@ -257,6 +264,11 @@ export class GoogleSheetsService {
       return numericSheetId
     } catch (error) {
       this.logger.error('Failed to fetch sheetId', error)
+      this.errorLogsService.logError({
+        message: 'Failed to fetch sheetId',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'google_sheets',
+      })
       return null
     }
   }
@@ -292,6 +304,11 @@ export class GoogleSheetsService {
       })
     } catch (error) {
       this.logger.error(`Failed to clear row background for row ${rowIndex}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to clear row background for row ${rowIndex}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'google_sheets',
+      })
     }
   }
 
@@ -374,6 +391,11 @@ export class GoogleSheetsService {
       return null
     } catch (error) {
       this.logger.error('Failed to append request row to Google Sheets', error)
+      this.errorLogsService.logError({
+        message: 'Failed to append request row to Google Sheets',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'google_sheets',
+      })
       this.slackChannelsService.sendSystemError(
         `[GoogleSheets] Failed to append request row for requestId=${request.id} companyId=${companyId}: ${(error as Error).message}`,
       )
@@ -413,6 +435,11 @@ export class GoogleSheetsService {
           `Failed to update column ${item.column} row ${rowIndex} in Google Sheets`,
           error,
         )
+        this.errorLogsService.logError({
+          message: `Failed to update column ${item.column} row ${rowIndex} in Google Sheets`,
+          stackTrace: (error as Error).stack ?? null,
+          path: 'google_sheets',
+        })
       }
     }
   }
@@ -450,6 +477,11 @@ export class GoogleSheetsService {
         })
       } catch (error) {
         this.logger.error(`Failed to update approval column ${item.column} row ${rowIndex}`, error)
+        this.errorLogsService.logError({
+          message: `Failed to update approval column ${item.column} row ${rowIndex}`,
+          stackTrace: (error as Error).stack ?? null,
+          path: 'google_sheets',
+        })
       }
     }
   }

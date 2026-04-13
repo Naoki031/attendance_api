@@ -16,3 +16,4 @@ order: 80
 - In **Meetings**, pin your frequently used rooms so they always appear at the top of the list
 - In a meeting, use **Story Point voting** (Fibonacci cards) for sprint estimation — the system calculates the average automatically
 - When sharing your screen in a meeting, other participants can see your cursor and place **click markers** to point things out
+- If you are the meeting host, you can **pre-assign co-hosts from the meeting list** without joining the room: click the ⋮ menu on a meeting card → **"Manage Co-Hosts"** → search and add users. You can also promote/demote co-hosts from inside the room via the control bar. Co-hosts can **invite people**, **edit the meeting schedule/time only** (not title, description, privacy, or companies), **manage host schedules**, **configure auto-call settings**, and **end the meeting**, but cannot transfer host, manage other co-hosts, or add/remove scheduled participants

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { TranslateService } from '@/modules/translate/translate.service'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { TtsService } from './tts.service'
 
 export interface SpeechResult {
@@ -21,6 +22,7 @@ export class SpeechService {
     private readonly configService: ConfigService,
     private readonly translateService: TranslateService,
     private readonly ttsService: TtsService,
+    private readonly errorLogsService: ErrorLogsService,
   ) {
     this.whisperUrl = this.configService.get<string>('WHISPER_URL') ?? 'http://whisper:5001'
     this.groqApiKey = this.configService.get<string>('GROQ_API_KEY') ?? null
@@ -224,6 +226,11 @@ export class SpeechService {
 
       if (!response.ok) {
         this.logger.error(`Whisper returned ${response.status}`)
+        this.errorLogsService.logError({
+          message: `Whisper HTTP error: ${response.status} ${response.statusText}`,
+          stackTrace: null,
+          path: 'speech_service',
+        })
 
         return { text: '', language: 'en' }
       }
@@ -240,6 +247,11 @@ export class SpeechService {
       return { text, language }
     } catch (error) {
       this.logger.error('Whisper transcription failed', error)
+      this.errorLogsService.logError({
+        message: 'Whisper transcription failed',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'speech_service',
+      })
 
       return { text: '', language: 'en' }
     }

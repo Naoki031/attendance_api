@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as nodemailer from 'nodemailer'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 export interface SendMailOptions {
   to: string
@@ -13,7 +14,10 @@ export class MailService {
   private readonly logger = new Logger(MailService.name)
   private readonly transporter: nodemailer.Transporter
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly errorLogsService: ErrorLogsService,
+  ) {
     // ConfigService.get() always returns a string from env vars — parse explicitly
     const secure = this.configService.get('MAIL_SECURE') === 'true'
     const port = Number(this.configService.get('MAIL_PORT') ?? 587)
@@ -44,6 +48,11 @@ export class MailService {
       this.logger.log(`Mail sent to ${options.to}: ${options.subject}`)
     } catch (error) {
       this.logger.error(`Failed to send mail to ${options.to}: ${(error as Error).message}`)
+      this.errorLogsService.logError({
+        message: `Failed to send mail to ${options.to}: ${(error as Error).message}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'mail',
+      })
     }
   }
 }

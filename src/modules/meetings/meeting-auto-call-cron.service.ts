@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { MeetingScheduledParticipantsService } from './meeting-scheduled-participants.service'
 import { MeetingsGateway } from './meetings.gateway'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 /**
  * Runs every minute to fire auto-call invites for scheduled meeting participants.
@@ -17,6 +18,7 @@ export class MeetingAutoCallCronService {
   constructor(
     private readonly scheduledParticipantsService: MeetingScheduledParticipantsService,
     private readonly meetingsGateway: MeetingsGateway,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   @Cron('* * * * *')
@@ -36,6 +38,11 @@ export class MeetingAutoCallCronService {
       targets = await this.scheduledParticipantsService.findUpcomingAutoCallTargets()
     } catch (error) {
       this.logger.error('Failed to load auto-call targets', (error as Error).message)
+      this.errorLogsService.logError({
+        message: 'Failed to load auto-call targets',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_auto_call_cron',
+      })
       return
     }
 
@@ -80,6 +87,11 @@ export class MeetingAutoCallCronService {
       targets = await this.scheduledParticipantsService.findRetryAutoCallTargets()
     } catch (error) {
       this.logger.error('Failed to load retry auto-call targets', (error as Error).message)
+      this.errorLogsService.logError({
+        message: 'Failed to load retry auto-call targets',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'meeting_auto_call_cron',
+      })
       return
     }
 

@@ -20,6 +20,7 @@ import {
 import { MeetingAutoCallConfig } from './entities/meeting_auto_call_config.entity'
 import { MeetingInvite, MeetingInviteStatus } from './entities/meeting_invite.entity'
 import { Meeting } from './entities/meeting.entity'
+import { MeetingParticipant, MeetingParticipantRole } from './entities/meeting_participant.entity'
 import { CreateScheduledParticipantsDto } from './dto/create-scheduled-participants.dto'
 import { RsvpScheduledParticipantDto } from './dto/rsvp-scheduled-participant.dto'
 import { UpsertAutoCallConfigDto } from './dto/upsert-auto-call-config.dto'
@@ -27,6 +28,7 @@ import { MailService } from '@/modules/mail/mail.service'
 import { ConfigService } from '@nestjs/config'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 import { MeetingsGateway } from './meetings.gateway'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import moment from 'moment-timezone'
 
 @Injectable()
@@ -44,9 +46,12 @@ export class MeetingScheduledParticipantsService {
     private readonly employeeRequestRepository: Repository<EmployeeRequest>,
     @InjectRepository(MeetingInvite)
     private readonly inviteRepository: Repository<MeetingInvite>,
+    @InjectRepository(MeetingParticipant)
+    private readonly participantRepository: Repository<MeetingParticipant>,
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
     private readonly meetingsGateway: MeetingsGateway,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -65,6 +70,16 @@ export class MeetingScheduledParticipantsService {
     if (meeting.host_id !== userId && !isPrivilegedUser(roles)) {
       throw new ForbiddenException('Only the meeting host can manage scheduled participants')
     }
+  }
+
+  /**
+   * Returns true if the given user is a co-host of the meeting.
+   */
+  private async isCoHostInDb(meetingId: number, userId: number): Promise<boolean> {
+    const participant = await this.participantRepository.findOne({
+      where: { meeting_id: meetingId, user_id: userId, role: MeetingParticipantRole.CO_HOST },
+    })
+    return !!participant
   }
 
   /**
@@ -130,6 +145,11 @@ export class MeetingScheduledParticipantsService {
           this.logger.error(
             `Failed to send RSVP email to user ${participant.user_id}: ${(error as Error).message}`,
           )
+          this.errorLogsService.logError({
+            message: `Failed to send RSVP email to user ${participant.user_id}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: 'meeting_scheduled_participants',
+          })
         })
       }
 
@@ -306,7 +326,7 @@ export class MeetingScheduledParticipantsService {
   }
 
   /**
-   * Creates or updates the auto-call config for a meeting. Host only.
+   * Creates or updates the auto-call config for a meeting. Host, co-host, or admin.
    */
   async upsertAutoCallConfig(
     meetingUuid: string,
@@ -315,7 +335,10 @@ export class MeetingScheduledParticipantsService {
     dto: UpsertAutoCallConfigDto,
   ): Promise<MeetingAutoCallConfig> {
     const meeting = await this.getMeeting(meetingUuid)
-    this.assertHost(meeting, callerId, roles)
+    const isCoHost = await this.isCoHostInDb(meeting.id, callerId)
+    if (meeting.host_id !== callerId && !isCoHost && !isPrivilegedUser(roles)) {
+      throw new ForbiddenException('Only the host, co-host, or an admin can configure auto-call')
+    }
 
     let config = await this.autoCallConfigRepository.findOne({ where: { meeting_id: meeting.id } })
 

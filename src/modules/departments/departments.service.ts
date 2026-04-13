@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Department } from './entities/department.entity'
 import { CreateDepartmentDto } from './dto/create-department.dto'
 import { UpdateDepartmentDto } from './dto/update-department.dto'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 interface DepartmentFilters {
   search?: string
@@ -11,9 +12,12 @@ interface DepartmentFilters {
 
 @Injectable()
 export class DepartmentsService {
+  private readonly logger = new Logger(DepartmentsService.name)
+
   constructor(
     @InjectRepository(Department)
     private readonly departmentRepository: Repository<Department>,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -23,7 +27,17 @@ export class DepartmentsService {
    * @returns A promise that resolves to the created department.
    */
   async create(createDepartmentDto: CreateDepartmentDto): Promise<Department> {
-    return this.departmentRepository.save(createDepartmentDto)
+    try {
+      return await this.departmentRepository.save(createDepartmentDto)
+    } catch (error) {
+      this.logger.error('Failed to create department', error)
+      this.errorLogsService.logError({
+        message: 'Failed to create department',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'departments',
+      })
+      throw error
+    }
   }
 
   /**
@@ -46,13 +60,23 @@ export class DepartmentsService {
    * @returns A promise that resolves to an array of departments.
    */
   async findAll() {
-    const departments = await this.departmentRepository.find()
-    const countMap = await this.fetchUserCountMap(departments.map((department) => department.id))
+    try {
+      const departments = await this.departmentRepository.find()
+      const countMap = await this.fetchUserCountMap(departments.map((department) => department.id))
 
-    return departments.map((department) => ({
-      ...department,
-      user_count: countMap.get(department.id) ?? 0,
-    }))
+      return departments.map((department) => ({
+        ...department,
+        user_count: countMap.get(department.id) ?? 0,
+      }))
+    } catch (error) {
+      this.logger.error('Failed to fetch all departments', error)
+      this.errorLogsService.logError({
+        message: 'Failed to fetch all departments',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'departments',
+      })
+      throw error
+    }
   }
 
   /**
@@ -62,23 +86,33 @@ export class DepartmentsService {
    * @returns A promise that resolves to an array of matching departments.
    */
   async findWithFilters(filters: DepartmentFilters) {
-    const queryBuilder = this.departmentRepository.createQueryBuilder('department')
+    try {
+      const queryBuilder = this.departmentRepository.createQueryBuilder('department')
 
-    if (filters.search) {
-      const searchTerm = `%${filters.search.toLowerCase()}%`
-      queryBuilder.andWhere(
-        '(LOWER(department.name) LIKE :search OR LOWER(department.slug) LIKE :search OR LOWER(department.descriptions) LIKE :search)',
-        { search: searchTerm },
-      )
+      if (filters.search) {
+        const searchTerm = `%${filters.search.toLowerCase()}%`
+        queryBuilder.andWhere(
+          '(LOWER(department.name) LIKE :search OR LOWER(department.slug) LIKE :search OR LOWER(department.descriptions) LIKE :search)',
+          { search: searchTerm },
+        )
+      }
+
+      const departments = await queryBuilder.getMany()
+      const countMap = await this.fetchUserCountMap(departments.map((department) => department.id))
+
+      return departments.map((department) => ({
+        ...department,
+        user_count: countMap.get(department.id) ?? 0,
+      }))
+    } catch (error) {
+      this.logger.error('Failed to fetch departments with filters', error)
+      this.errorLogsService.logError({
+        message: 'Failed to fetch departments with filters',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'departments',
+      })
+      throw error
     }
-
-    const departments = await queryBuilder.getMany()
-    const countMap = await this.fetchUserCountMap(departments.map((department) => department.id))
-
-    return departments.map((department) => ({
-      ...department,
-      user_count: countMap.get(department.id) ?? 0,
-    }))
   }
 
   /**
@@ -110,15 +144,25 @@ export class DepartmentsService {
     departmentId: number,
     updateDepartmentDto: UpdateDepartmentDto,
   ): Promise<Department> {
-    await this.departmentRepository.update({ id: departmentId }, { ...updateDepartmentDto })
+    try {
+      await this.departmentRepository.update({ id: departmentId }, { ...updateDepartmentDto })
 
-    const department = this.findOne(departmentId)
+      const department = this.findOne(departmentId)
 
-    if (!department) {
-      throw new NotFoundException('Department not found')
+      if (!department) {
+        throw new NotFoundException('Department not found')
+      }
+
+      return department
+    } catch (error) {
+      this.logger.error('Failed to update department', error)
+      this.errorLogsService.logError({
+        message: 'Failed to update department',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'departments',
+      })
+      throw error
     }
-
-    return department
   }
 
   /**
@@ -128,6 +172,16 @@ export class DepartmentsService {
    * @returns A promise that resolves to the result of the deletion.
    */
   async remove(departmentId: number) {
-    return this.departmentRepository.delete({ id: departmentId })
+    try {
+      return await this.departmentRepository.delete({ id: departmentId })
+    } catch (error) {
+      this.logger.error('Failed to remove department', error)
+      this.errorLogsService.logError({
+        message: 'Failed to remove department',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'departments',
+      })
+      throw error
+    }
   }
 }

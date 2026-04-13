@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { MessageReaction } from './entities/message-reaction.entity'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 export interface ReactionGroup {
   emoji: string
@@ -11,9 +12,12 @@ export interface ReactionGroup {
 
 @Injectable()
 export class MessageReactionsService {
+  private readonly logger = new Logger(MessageReactionsService.name)
+
   constructor(
     @InjectRepository(MessageReaction)
     private readonly reactionRepository: Repository<MessageReaction>,
+    private readonly errorLogsService: ErrorLogsService,
   ) {}
 
   /**
@@ -24,45 +28,65 @@ export class MessageReactionsService {
    * Returns the updated grouped reactions for the message.
    */
   async toggle(messageId: number, userId: number, emoji: string): Promise<ReactionGroup[]> {
-    const existing = await this.reactionRepository.findOne({
-      where: { message_id: messageId, user_id: userId },
-    })
+    try {
+      const existing = await this.reactionRepository.findOne({
+        where: { message_id: messageId, user_id: userId },
+      })
 
-    if (existing) {
-      await this.reactionRepository.delete({ id: existing.id })
+      if (existing) {
+        await this.reactionRepository.delete({ id: existing.id })
 
-      // Same emoji clicked — just remove (toggle off), don't re-add
-      if (existing.emoji === emoji) {
-        return this.getGroupedByMessage(messageId)
+        // Same emoji clicked — just remove (toggle off), don't re-add
+        if (existing.emoji === emoji) {
+          return this.getGroupedByMessage(messageId)
+        }
       }
+
+      await this.reactionRepository.save({ message_id: messageId, user_id: userId, emoji })
+
+      return this.getGroupedByMessage(messageId)
+    } catch (error) {
+      this.logger.error('Failed to toggle reaction', error)
+      this.errorLogsService.logError({
+        message: 'Failed to toggle reaction',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'message_reactions',
+      })
+      throw error
     }
-
-    await this.reactionRepository.save({ message_id: messageId, user_id: userId, emoji })
-
-    return this.getGroupedByMessage(messageId)
   }
 
   /**
    * Returns all reactions for a message grouped by emoji.
    */
   async getGroupedByMessage(messageId: number): Promise<ReactionGroup[]> {
-    const reactions = await this.reactionRepository.find({
-      where: { message_id: messageId },
-    })
+    try {
+      const reactions = await this.reactionRepository.find({
+        where: { message_id: messageId },
+      })
 
-    const grouped = new Map<string, number[]>()
+      const grouped = new Map<string, number[]>()
 
-    for (const reaction of reactions) {
-      const existing = grouped.get(reaction.emoji) ?? []
-      existing.push(reaction.user_id)
-      grouped.set(reaction.emoji, existing)
+      for (const reaction of reactions) {
+        const existing = grouped.get(reaction.emoji) ?? []
+        existing.push(reaction.user_id)
+        grouped.set(reaction.emoji, existing)
+      }
+
+      return Array.from(grouped.entries()).map(([emoji, userIds]) => ({
+        emoji,
+        count: userIds.length,
+        userIds,
+      }))
+    } catch (error) {
+      this.logger.error('Failed to get grouped reactions by message', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get grouped reactions by message',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'message_reactions',
+      })
+      return []
     }
-
-    return Array.from(grouped.entries()).map(([emoji, userIds]) => ({
-      emoji,
-      count: userIds.length,
-      userIds,
-    }))
   }
 
   /**
@@ -72,37 +96,47 @@ export class MessageReactionsService {
   async getGroupedForMessages(messageIds: number[]): Promise<Map<number, ReactionGroup[]>> {
     if (messageIds.length === 0) return new Map()
 
-    const reactions = await this.reactionRepository
-      .createQueryBuilder('reaction')
-      .where('reaction.message_id IN (:...messageIds)', { messageIds })
-      .getMany()
+    try {
+      const reactions = await this.reactionRepository
+        .createQueryBuilder('reaction')
+        .where('reaction.message_id IN (:...messageIds)', { messageIds })
+        .getMany()
 
-    const byMessage = new Map<number, Map<string, number[]>>()
+      const byMessage = new Map<number, Map<string, number[]>>()
 
-    for (const reaction of reactions) {
-      if (!byMessage.has(reaction.message_id)) {
-        byMessage.set(reaction.message_id, new Map())
+      for (const reaction of reactions) {
+        if (!byMessage.has(reaction.message_id)) {
+          byMessage.set(reaction.message_id, new Map())
+        }
+
+        const emojiMap = byMessage.get(reaction.message_id)!
+        const userIds = emojiMap.get(reaction.emoji) ?? []
+        userIds.push(reaction.user_id)
+        emojiMap.set(reaction.emoji, userIds)
       }
 
-      const emojiMap = byMessage.get(reaction.message_id)!
-      const userIds = emojiMap.get(reaction.emoji) ?? []
-      userIds.push(reaction.user_id)
-      emojiMap.set(reaction.emoji, userIds)
+      const result = new Map<number, ReactionGroup[]>()
+
+      for (const [messageId, emojiMap] of byMessage.entries()) {
+        result.set(
+          messageId,
+          Array.from(emojiMap.entries()).map(([emoji, userIds]) => ({
+            emoji,
+            count: userIds.length,
+            userIds,
+          })),
+        )
+      }
+
+      return result
+    } catch (error) {
+      this.logger.error('Failed to get grouped reactions for messages', error)
+      this.errorLogsService.logError({
+        message: 'Failed to get grouped reactions for messages',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'message_reactions',
+      })
+      return new Map()
     }
-
-    const result = new Map<number, ReactionGroup[]>()
-
-    for (const [messageId, emojiMap] of byMessage.entries()) {
-      result.set(
-        messageId,
-        Array.from(emojiMap.entries()).map(([emoji, userIds]) => ({
-          emoji,
-          count: userIds.length,
-          userIds,
-        })),
-      )
-    }
-
-    return result
   }
 }

@@ -26,6 +26,7 @@ import { ChatModule } from '@/modules/chat/chat.module'
 import { FirebaseModule } from '@/modules/firebase/firebase.module'
 import { AuthModule } from '@/modules/auth/auth.module'
 import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/user_group_permissions.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/use
     FirebaseModule,
     AuthModule,
     UserGroupPermissionsModule,
+    ErrorLogsModule,
   ],
   controllers: [
     MeetingsController,

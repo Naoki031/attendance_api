@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid'
 import moment from 'moment'
 import * as fs from 'fs'
 import * as path from 'path'
+import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 @Injectable()
 export class StorageService {
@@ -14,7 +15,10 @@ export class StorageService {
   private readonly publicUrl: string
   private readonly useLocal: boolean
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly errorLogsService: ErrorLogsService,
+  ) {
     const accessKey = this.configService.get<string>('AWS_ACCESS_KEY')
     const endpoint = this.configService.get<string>('S3_ENDPOINT')
 
@@ -107,6 +111,11 @@ export class StorageService {
       )
     } catch (error) {
       this.logger.error(`Failed to delete image at ${url}:`, error)
+      this.errorLogsService.logError({
+        message: `Failed to delete image at ${url}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'storage',
+      })
     }
   }
 

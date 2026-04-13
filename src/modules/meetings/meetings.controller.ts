@@ -25,6 +25,7 @@ import { GetTokenDto } from './dto/get-token.dto'
 import { ProcessSpeechDto } from './dto/process-speech.dto'
 import { CreateInvitesDto } from './dto/create-invites.dto'
 import { RsvpDto } from './dto/rsvp.dto'
+import { AddCoHostDto } from './dto/add-co-host.dto'
 import { ChatRoomService } from '@/modules/chat/chat-room.service'
 import { UsersService } from '@/modules/users/users.service'
 import { User as UserDecorator } from '@/modules/auth/decorators/user.decorator'
@@ -288,6 +289,48 @@ export class MeetingsController {
       // Tell the invitee to dismiss the call notification immediately
       this.meetingsGateway.emitInviteCancelled(targetUserId, uuid)
     }
+  }
+
+  /**
+   * Returns the list of co-hosts for a meeting. Host or admin only.
+   */
+  @Get(':uuid/co-hosts')
+  @Permissions('all_privileges', 'read')
+  getCoHosts(@Param('uuid') uuid: string) {
+    return this.meetingsService.getCoHosts(uuid)
+  }
+
+  /**
+   * Adds a co-host to a meeting. Host or admin only.
+   */
+  @Post(':uuid/co-hosts')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'update')
+  addCoHost(
+    @Param('uuid') uuid: string,
+    @UserDecorator() user: User,
+    @Body(ValidationPipe) dto: AddCoHostDto,
+  ) {
+    return this.meetingsService.addCoHost(uuid, user.id, dto.user_id, isPrivilegedUser(user.roles))
+  }
+
+  /**
+   * Removes a co-host from a meeting. Host or admin only.
+   */
+  @Delete(':uuid/co-hosts/:userId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'update')
+  removeCoHost(
+    @Param('uuid') uuid: string,
+    @Param('userId', ParseIntPipe) targetUserId: number,
+    @UserDecorator() user: User,
+  ) {
+    return this.meetingsService.removeCoHost(
+      uuid,
+      user.id,
+      targetUserId,
+      isPrivilegedUser(user.roles),
+    )
   }
 
   @Post(':uuid/speech')

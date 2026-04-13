@@ -9,6 +9,7 @@ import { UserWorkSchedule } from '@/modules/user_work_schedules/entities/user_wo
 import { StorageModule } from '@/modules/storage/storage.module'
 import { FirebaseModule } from '@/modules/firebase/firebase.module'
 import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/user_group_permissions.module'
+import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/use
     StorageModule,
     FirebaseModule,
     UserGroupPermissionsModule,
+    ErrorLogsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService, ...usersProviders],
