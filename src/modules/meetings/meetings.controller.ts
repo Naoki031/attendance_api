@@ -149,7 +149,7 @@ export class MeetingsController {
   @Post(':uuid/generate-password')
   @Permissions('all_privileges', 'update')
   generatePassword(@Param('uuid') uuid: string, @UserDecorator() user: User) {
-    return this.meetingsService.generatePassword(uuid, user.id)
+    return this.meetingsService.generatePassword(uuid, user.id, isPrivilegedUser(user.roles))
   }
 
   /**

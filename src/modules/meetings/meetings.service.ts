@@ -118,10 +118,14 @@ export class MeetingsService {
    * Generates a new password for a private meeting. Host only.
    * Returns the new plain-text password (only time it is exposed).
    */
-  async generatePassword(uuid: string, userId: number): Promise<{ plain_password: string }> {
+  async generatePassword(
+    uuid: string,
+    userId: number,
+    isPrivileged = false,
+  ): Promise<{ plain_password: string }> {
     try {
       const meeting = await this.findByUuid(uuid)
-      this.assertHost(meeting, userId)
+      await this.assertCanManage(meeting, userId, isPrivileged)
 
       const plainPassword = this.generateRandomPassword()
       const passwordHash = await bcrypt.hash(plainPassword, 10)
@@ -337,20 +341,6 @@ export class MeetingsService {
     try {
       const meeting = await this.findByUuid(uuid)
       await this.assertCanManage(meeting, userId, isPrivileged)
-
-      const isCoHost = !isPrivileged && meeting.host_id !== userId
-      if (isCoHost) {
-        // Co-hosts can only update schedule and time fields
-        const hasNonScheduleChanges =
-          dto.title !== undefined ||
-          dto.description !== undefined ||
-          dto.is_private !== undefined ||
-          dto.password !== undefined ||
-          dto.company_ids !== undefined
-        if (hasNonScheduleChanges) {
-          throw new ForbiddenException('Co-hosts can only update schedule and time fields')
-        }
-      }
 
       if (dto.title !== undefined) meeting.title = dto.title
       if (dto.description !== undefined) meeting.description = dto.description
@@ -601,7 +591,7 @@ export class MeetingsService {
     throw new ForbiddenException('Only the host or an admin can perform this action')
   }
 
-  private async isCoHostInDb(meetingId: number, userId: number): Promise<boolean> {
+  async isCoHostInDb(meetingId: number, userId: number): Promise<boolean> {
     const participant = await this.participantRepository.findOneBy({
       meeting_id: meetingId,
       user_id: userId,
@@ -620,12 +610,6 @@ export class MeetingsService {
     const isCoHost = await this.isCoHostInDb(meeting.id, userId)
     if (!isCoHost) {
       throw new ForbiddenException('Only the host, co-host, or an admin can perform this action')
-    }
-  }
-
-  private assertHost(meeting: Meeting, userId: number): void {
-    if (meeting.host_id !== userId) {
-      throw new ForbiddenException('Only the host can perform this action')
     }
   }
 
@@ -818,7 +802,10 @@ export class MeetingsService {
     try {
       const meeting = await this.findByUuid(meetingUuid)
       if (meeting.host_id !== requesterId && !isPrivileged) {
-        throw new ForbiddenException('Only the host can view invites')
+        const isCoHost = await this.isCoHostInDb(meeting.id, requesterId)
+        if (!isCoHost) {
+          throw new ForbiddenException('Only the host or co-host can view invites')
+        }
       }
 
       return this.inviteRepository.find({
@@ -890,7 +877,10 @@ export class MeetingsService {
     try {
       const meeting = await this.findByUuid(meetingUuid)
       if (meeting.host_id !== requesterId && !isPrivileged) {
-        throw new ForbiddenException('Only the host can cancel invites')
+        const isCoHost = await this.isCoHostInDb(meeting.id, requesterId)
+        if (!isCoHost) {
+          throw new ForbiddenException('Only the host or co-host can cancel invites')
+        }
       }
 
       const invite = await this.inviteRepository.findOne({

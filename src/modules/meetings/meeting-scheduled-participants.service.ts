@@ -20,7 +20,7 @@ import {
 import { MeetingAutoCallConfig } from './entities/meeting_auto_call_config.entity'
 import { MeetingInvite, MeetingInviteStatus } from './entities/meeting_invite.entity'
 import { Meeting } from './entities/meeting.entity'
-import { MeetingParticipant, MeetingParticipantRole } from './entities/meeting_participant.entity'
+import { MeetingsService } from './meetings.service'
 import { CreateScheduledParticipantsDto } from './dto/create-scheduled-participants.dto'
 import { RsvpScheduledParticipantDto } from './dto/rsvp-scheduled-participant.dto'
 import { UpsertAutoCallConfigDto } from './dto/upsert-auto-call-config.dto'
@@ -46,8 +46,7 @@ export class MeetingScheduledParticipantsService {
     private readonly employeeRequestRepository: Repository<EmployeeRequest>,
     @InjectRepository(MeetingInvite)
     private readonly inviteRepository: Repository<MeetingInvite>,
-    @InjectRepository(MeetingParticipant)
-    private readonly participantRepository: Repository<MeetingParticipant>,
+    private readonly meetingsService: MeetingsService,
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
     private readonly meetingsGateway: MeetingsGateway,
@@ -64,22 +63,17 @@ export class MeetingScheduledParticipantsService {
   }
 
   /**
-   * Asserts that the caller is the host or a privileged user.
+   * Asserts that the caller is the host, co-host, or a privileged user.
    */
-  private assertHost(meeting: Meeting, userId: number, roles: string[]): void {
-    if (meeting.host_id !== userId && !isPrivilegedUser(roles)) {
-      throw new ForbiddenException('Only the meeting host can manage scheduled participants')
+  private async assertCanManage(meeting: Meeting, userId: number, roles: string[]): Promise<void> {
+    if (meeting.host_id === userId) return
+    if (isPrivilegedUser(roles)) return
+    const isCoHost = await this.meetingsService.isCoHostInDb(meeting.id, userId)
+    if (!isCoHost) {
+      throw new ForbiddenException(
+        'Only the host, co-host, or an admin can manage scheduled participants',
+      )
     }
-  }
-
-  /**
-   * Returns true if the given user is a co-host of the meeting.
-   */
-  private async isCoHostInDb(meetingId: number, userId: number): Promise<boolean> {
-    const participant = await this.participantRepository.findOne({
-      where: { meeting_id: meetingId, user_id: userId, role: MeetingParticipantRole.CO_HOST },
-    })
-    return !!participant
   }
 
   /**
@@ -109,7 +103,7 @@ export class MeetingScheduledParticipantsService {
       relations: ['host'],
     })
     if (!meeting) throw new NotFoundException('Meeting not found')
-    this.assertHost(meeting, invitedByUserId, invitedByRoles)
+    await this.assertCanManage(meeting, invitedByUserId, invitedByRoles)
 
     // Load existing participants to skip duplicates
     const existing = await this.scheduledParticipantRepository.find({
@@ -295,7 +289,7 @@ export class MeetingScheduledParticipantsService {
     roles: string[],
   ): Promise<void> {
     const meeting = await this.getMeeting(meetingUuid)
-    this.assertHost(meeting, callerId, roles)
+    await this.assertCanManage(meeting, callerId, roles)
     await this.scheduledParticipantRepository.delete({
       meeting_id: meeting.id,
       user_id: targetUserId,
@@ -335,7 +329,7 @@ export class MeetingScheduledParticipantsService {
     dto: UpsertAutoCallConfigDto,
   ): Promise<MeetingAutoCallConfig> {
     const meeting = await this.getMeeting(meetingUuid)
-    const isCoHost = await this.isCoHostInDb(meeting.id, callerId)
+    const isCoHost = await this.meetingsService.isCoHostInDb(meeting.id, callerId)
     if (meeting.host_id !== callerId && !isCoHost && !isPrivilegedUser(roles)) {
       throw new ForbiddenException('Only the host, co-host, or an admin can configure auto-call')
     }
