@@ -115,6 +115,17 @@ export class EmployeeRequestsService {
     requestingUser: User,
   ): Promise<EmployeeRequest> {
     try {
+      const companyId = await this.getCompanyId(requestingUser.id)
+      const feature = this.mapTypeToFeature(createDto.type)
+      const channel = await this.slackChannelsService.findByFeature(feature, companyId ?? undefined)
+      const approvers = await this.findApproversForChannel(channel?.mention_user_ids, companyId)
+
+      if (!approvers.length) {
+        throw new ForbiddenException(
+          'No approvers configured for your company. Please contact your administrator.',
+        )
+      }
+
       const created = await this.employeeRequestRepository.save({
         ...createDto,
         user_id: requestingUser.id,
@@ -128,14 +139,6 @@ export class EmployeeRequestsService {
       })
 
       if (requestWithUser) {
-        const companyId = await this.getCompanyId(requestingUser.id)
-
-        const feature = this.mapTypeToFeature(createDto.type)
-        const channel = await this.slackChannelsService.findByFeature(
-          feature,
-          companyId ?? undefined,
-        )
-        const approvers = await this.findApproversForChannel(channel?.mention_user_ids, companyId)
         const slackMessage = await this.buildSlackMessage(
           requestWithUser,
           approvers,
@@ -447,7 +450,8 @@ export class EmployeeRequestsService {
   /**
    * Returns approvers for a Slack mention:
    * - If the channel has configured mention_user_ids, load those users.
-   * - Otherwise fall back to all active admin / super_admin users in the same company.
+   * - Otherwise, if the company has designated approvers, use them.
+   * - Final fallback: all active admin / super_admin users in the same company.
    */
   private async findApproversForChannel(
     mentionUserIds?: number[],
@@ -457,20 +461,36 @@ export class EmployeeRequestsService {
       return this.userRepository.find({ where: { id: In(mentionUserIds) } })
     }
 
+    // Check company-specific designated approvers before falling back to all admins
+    if (companyId) {
+      const companyApprovers = await this.companyApproverRepository.find({
+        where: { company_id: companyId },
+        relations: ['user'],
+      })
+      const designatedApprovers = companyApprovers
+        .map((record) => record.user)
+        .filter((user): user is User => user != null && user.is_activated)
+
+      if (designatedApprovers.length) {
+        return designatedApprovers
+      }
+    }
+
+    if (!companyId) {
+      this.logger.warn(`No company found for approver lookup — skipping admin fallback`)
+      return []
+    }
+
     const query = this.userRepository
       .createQueryBuilder('user')
       .innerJoin('user.user_group_permissions', 'ugp')
       .innerJoin('ugp.permission_group', 'pg')
+      .innerJoin('user.user_departments', 'ud')
       .where('pg.name IN (:...names)', {
         names: ['admin', 'super_admin', 'super admin', 'superadmin', 'super'],
       })
       .andWhere('user.is_activated = :activated', { activated: true })
-
-    if (companyId) {
-      query
-        .innerJoin('user.user_departments', 'ud')
-        .andWhere('ud.company_id = :companyId', { companyId })
-    }
+      .andWhere('ud.company_id = :companyId', { companyId })
 
     return query.getMany()
   }

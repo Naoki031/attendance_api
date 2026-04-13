@@ -441,7 +441,10 @@ export class MeetingScheduledParticipantsService {
   ): moment.Moment | null {
     if (!meeting) return null
 
-    if (meeting.scheduled_at) {
+    // Only use scheduled_at for one-time meetings.
+    // Daily/weekly meetings derive start time from schedule_time + today's date.
+    // Guard against stale scheduled_at left over from a type change.
+    if (meeting.scheduled_at && meeting.meeting_type === 'one_time') {
       return moment.utc(meeting.scheduled_at)
     }
 

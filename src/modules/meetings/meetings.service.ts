@@ -19,6 +19,7 @@ import { RsvpDto } from './dto/rsvp.dto'
 import moment from 'moment'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
 import { UsersService } from '@/modules/users/users.service'
+import { MeetingHostSchedulesService } from './meeting_host_schedules.service'
 
 @Injectable()
 export class MeetingsService {
@@ -37,6 +38,7 @@ export class MeetingsService {
     private readonly inviteRepository: Repository<MeetingInvite>,
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    private readonly hostSchedulesService: MeetingHostSchedulesService,
   ) {}
 
   async create(
@@ -261,6 +263,12 @@ export class MeetingsService {
     if (dto.meeting_type !== undefined) meeting.meeting_type = dto.meeting_type
     if (dto.scheduled_at !== undefined) meeting.scheduled_at = moment(dto.scheduled_at).toDate()
     if (dto.schedule_time !== undefined) meeting.schedule_time = dto.schedule_time
+
+    // When switching to daily/weekly, scheduled_at must be cleared so auto-call
+    // computes trigger from schedule_time (today's date) instead of a stale one-time date
+    if (dto.meeting_type === MeetingType.DAILY || dto.meeting_type === MeetingType.WEEKLY) {
+      meeting.scheduled_at = null as unknown as Date
+    }
     if (dto.schedule_day_of_week !== undefined)
       meeting.schedule_day_of_week = dto.schedule_day_of_week
     if (dto.schedule_interval_weeks !== undefined)
@@ -471,7 +479,15 @@ export class MeetingsService {
     isPrivileged: boolean,
   ): Promise<MeetingInvite[]> {
     const meeting = await this.findByUuid(meetingUuid)
-    if (meeting.host_id !== inviterId && !isPrivileged) {
+
+    const isPermanentHost = meeting.host_id === inviterId
+    const scheduledHostId = await this.hostSchedulesService.resolveHostForDate(
+      meeting.id,
+      moment().format('YYYY-MM-DD'),
+    )
+    const isScheduledHost = scheduledHostId === inviterId
+
+    if (!isPermanentHost && !isScheduledHost && !isPrivileged) {
       throw new ForbiddenException('Only the host can send invites')
     }
 
