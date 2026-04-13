@@ -59,21 +59,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = String(exception)
     }
 
-    // Only persist 5xx server errors to DB — 4xx are normal client errors (bad input, auth, not found)
-    // that would flood the table without real diagnostic value.
-    if (statusCode >= 500) {
-      this.persistErrorLog({
-        level: 'error',
-        message,
-        statusCode,
-        stackTrace: exception instanceof Error ? (exception.stack ?? null) : null,
-        request,
-        user: (request as unknown as Record<string, unknown>).user as Record<
-          string,
-          unknown
-        > | null,
-      })
-    }
+    // Persist all errors to DB: 4xx (client errors) as 'warn', 5xx (server errors) as 'error'.
+    const level = statusCode >= 500 ? 'error' : 'warn'
+    this.persistErrorLog({
+      level,
+      message,
+      statusCode,
+      stackTrace: exception instanceof Error ? (exception.stack ?? null) : null,
+      request,
+      user: (request as unknown as Record<string, unknown>).user as Record<string, unknown> | null,
+    })
 
     // Log to console for Docker visibility (all status codes)
     const truncatedMessage =
