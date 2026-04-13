@@ -39,6 +39,7 @@ import { MeetingScheduledParticipant } from '@/modules/meetings/entities/meeting
 import { MeetingAutoCallConfig } from '@/modules/meetings/entities/meeting_auto_call_config.entity'
 import { RoomSection } from '@/modules/room-sections/entities/room-section.entity'
 import { RoomSectionItem } from '@/modules/room-sections/entities/room-section-item.entity'
+import { ErrorLog } from '@/modules/error_logs/entities/error_log.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -84,6 +85,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         MeetingAutoCallConfig,
         RoomSection,
         RoomSectionItem,
+        ErrorLog,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

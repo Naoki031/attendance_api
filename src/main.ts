@@ -1,6 +1,8 @@
 import { ValidationPipe, RequestMethod, ClassSerializerInterceptor } from '@nestjs/common'
 import { NestFactory, Reflector } from '@nestjs/core'
 import { AppModule } from './app.module'
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
+import { DataSource } from 'typeorm'
 import * as dotenv from 'dotenv'
 import * as bodyParser from 'body-parser'
 import * as express from 'express'
@@ -40,6 +42,8 @@ async function bootstrap() {
       transform: true,
     }),
   )
+
+  app.useGlobalFilters(new AllExceptionsFilter(app.get(DataSource)))
 
   await app.listen(process.env.PORT || 3001)
 }
