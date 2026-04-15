@@ -30,6 +30,10 @@ export class MailService {
       host: this.configService.get<string>('MAIL_HOST', 'smtp.gmail.com'),
       port,
       secure,
+      // requireTLS: mandatory STARTTLS when secure=false (e.g. port 587).
+      // Without this Nodemailer negotiates TLS opportunistically — Gmail rejects
+      // any AUTH command sent before STARTTLS with "530 Must issue a STARTTLS command first".
+      requireTLS: !secure,
       ...(mailUser
         ? {
             auth: {

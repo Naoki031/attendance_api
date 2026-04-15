@@ -119,10 +119,12 @@ export class MeetingsController {
     @UserDecorator() user: User,
     @Body(ValidationPipe) dto: GetTokenDto,
   ) {
+    // Fetch full_name from DB because JWT payload may not contain it (old tokens).
+    const fullUser = await this.usersService.findOne(user.id)
     const token = await this.meetingsService.generateToken(
       uuid,
       user.id,
-      user.full_name,
+      fullUser.full_name,
       dto.password,
     )
 
