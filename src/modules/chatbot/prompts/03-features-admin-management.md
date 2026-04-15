@@ -34,5 +34,12 @@ order: 35
 - **Slack Channels**: Configure Slack webhooks for request notifications. Each channel can optionally attach a clickable link to the **Approvals page** and/or the **My Requests page** in the notification message (toggle "Include link to Approvals page" / "Include link to My Requests page" in the channel settings). When writing a **Message Template**, only variables relevant to the selected feature type are shown — e.g. `leave_type` only appears for OFF, `equipment_name` only for Equipment, `trip_destination` only for Business Trip. Available variables include `cc_users` (mentions CC'd colleagues) for all request types. Supported feature types: WFH, Leave (OFF), Equipment, Clock Forget, Overtime, **Business Trip**, and Error notifications.
 - **Google Sheets**: Configure Google Sheets integration per request type or for attendance logs (column mapping, spreadsheet ID, sheet name). Supported types: WFH, OFF, Equipment, Clock Forget, Overtime, **Business Trip**, and Attendance Logs. When a specific request type is selected, the **Field** dropdown filters to show only columns relevant to that type — e.g. `trip_destination` only appears when Business Trip is selected.
 
+**Logs & Monitoring:**
+- **Error Logs**: View system-level application errors. Stats cards show total, unresolved, and error-level counts at a glance. You can **resolve** multiple entries at once using the batch resolve button (appears when rows are selected), or **purge old logs** to clean up stale records. Each entry includes the error message, level, timestamp, and stack details.
+- **Translation Logs**: Monitor AI translation usage. Stats show total requests, cache hit rate, tokens saved rate, and error rate. Use **Purge Old** to delete stale entries. Useful for auditing translation costs and diagnosing translation failures.
+
+**Configuration:**
+- **Email Templates**: Manage email notification templates per company and per event type. Filter by company or template key. Create, edit, or delete templates — each template has a key, company scope, subject, and body content.
+
 **Settings:**
 - **System Settings**: Admin-only configuration panel. Currently includes the **Chatbot** section where you can reload chatbot prompt files from disk without restarting the server (useful after editing prompt markdown files). Click **"Reload"** to refresh all prompt sections immediately.
