@@ -296,8 +296,8 @@ export class MeetingsController {
    */
   @Get(':uuid/co-hosts')
   @Permissions('all_privileges', 'read')
-  getCoHosts(@Param('uuid') uuid: string) {
-    return this.meetingsService.getCoHosts(uuid)
+  getCoHosts(@Param('uuid') uuid: string, @UserDecorator() user: User) {
+    return this.meetingsService.getCoHosts(uuid, user.id, user.roles)
   }
 
   /**

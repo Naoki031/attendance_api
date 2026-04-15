@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   ConflictException,
   BadRequestException,
+  HttpException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -72,12 +73,14 @@ export class MeetingHostSchedulesService {
         relations: ['user'],
       }) as Promise<MeetingHostSchedule>
     } catch (error) {
-      this.logger.error('Failed to create host schedule', error)
-      this.errorLogsService.logError({
-        message: 'Failed to create host schedule',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to create host schedule', error)
+        this.errorLogsService.logError({
+          message: 'Failed to create host schedule',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -92,12 +95,14 @@ export class MeetingHostSchedulesService {
         order: { created_at: 'DESC' },
       })
     } catch (error) {
-      this.logger.error('Failed to find host schedules', error)
-      this.errorLogsService.logError({
-        message: 'Failed to find host schedules',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to find host schedules', error)
+        this.errorLogsService.logError({
+          message: 'Failed to find host schedules',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -135,12 +140,14 @@ export class MeetingHostSchedulesService {
         relations: ['user'],
       }) as Promise<MeetingHostSchedule>
     } catch (error) {
-      this.logger.error('Failed to update host schedule', error)
-      this.errorLogsService.logError({
-        message: 'Failed to update host schedule',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to update host schedule', error)
+        this.errorLogsService.logError({
+          message: 'Failed to update host schedule',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -158,12 +165,14 @@ export class MeetingHostSchedulesService {
       const schedule = await this.findScheduleById(scheduleId, meeting.id)
       await this.scheduleRepository.remove(schedule)
     } catch (error) {
-      this.logger.error('Failed to remove host schedule', error)
-      this.errorLogsService.logError({
-        message: 'Failed to remove host schedule',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to remove host schedule', error)
+        this.errorLogsService.logError({
+          message: 'Failed to remove host schedule',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -196,12 +205,14 @@ export class MeetingHostSchedulesService {
 
       return matching[0]!.user_id
     } catch (error) {
-      this.logger.error('Failed to resolve host for date', error)
-      this.errorLogsService.logError({
-        message: 'Failed to resolve host for date',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to resolve host for date', error)
+        this.errorLogsService.logError({
+          message: 'Failed to resolve host for date',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -213,12 +224,14 @@ export class MeetingHostSchedulesService {
 
       return this.resolveHostForDate(meeting.id, date)
     } catch (error) {
-      this.logger.error('Failed to resolve host for date by UUID', error)
-      this.errorLogsService.logError({
-        message: 'Failed to resolve host for date by UUID',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to resolve host for date by UUID', error)
+        this.errorLogsService.logError({
+          message: 'Failed to resolve host for date by UUID',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -262,12 +275,14 @@ export class MeetingHostSchedulesService {
       const excluded = [...(schedule.excluded_dates ?? []), date]
       await this.scheduleRepository.update({ id: schedule.id }, { excluded_dates: excluded })
     } catch (error) {
-      this.logger.error('Failed to exclude date from host schedule', error)
-      this.errorLogsService.logError({
-        message: 'Failed to exclude date from host schedule',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to exclude date from host schedule', error)
+        this.errorLogsService.logError({
+          message: 'Failed to exclude date from host schedule',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -321,12 +336,14 @@ export class MeetingHostSchedulesService {
           return
       }
     } catch (error) {
-      this.logger.error('Failed to truncate host schedule from date', error)
-      this.errorLogsService.logError({
-        message: 'Failed to truncate host schedule from date',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to truncate host schedule from date', error)
+        this.errorLogsService.logError({
+          message: 'Failed to truncate host schedule from date',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -400,12 +417,14 @@ export class MeetingHostSchedulesService {
         }),
       ])
     } catch (error) {
-      this.logger.error('Failed to swap host schedule dates', error)
-      this.errorLogsService.logError({
-        message: 'Failed to swap host schedule dates',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meeting_host_schedules',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to swap host schedule dates', error)
+        this.errorLogsService.logError({
+          message: 'Failed to swap host schedule dates',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meeting_host_schedules',
+        })
+      }
       throw error
     }
   }
@@ -442,25 +461,23 @@ export class MeetingHostSchedulesService {
 
         if (schedule.recur_end_date && dateString > schedule.recur_end_date) return false
 
-        const target = new Date(dateString + 'T00:00:00Z')
+        const target = moment.utc(dateString)
 
         // Must match the configured day of week first
-        if (target.getUTCDay() !== schedule.day_of_week) return false
+        if (target.day() !== schedule.day_of_week) return false
 
         // Find the first occurrence of day_of_week on or after recur_start_date.
         // recur_start_date does NOT need to be on the same day_of_week.
-        const anchor = new Date(schedule.recur_start_date + 'T00:00:00Z')
-        const daysUntilFirst = (schedule.day_of_week - anchor.getUTCDay() + 7) % 7
-        const firstOccurrence = new Date(anchor)
-        firstOccurrence.setUTCDate(firstOccurrence.getUTCDate() + daysUntilFirst)
+        const anchor = moment.utc(schedule.recur_start_date)
+        const daysUntilFirst = (schedule.day_of_week - anchor.day() + 7) % 7
+        const firstOccurrence = anchor.clone().add(daysUntilFirst, 'days')
 
         // target must be on or after the first occurrence
-        if (target < firstOccurrence) return false
+        if (target.isBefore(firstOccurrence)) return false
 
-        // weekDiff between two UTC-midnight dates with the same day_of_week
-        // is always an exact integer number of weeks — no rounding needed.
-        const msPerWeek = 7 * 24 * 60 * 60 * 1000
-        const weekDiff = (target.getTime() - firstOccurrence.getTime()) / msPerWeek
+        // Use day difference to avoid floating-point issues with millisecond arithmetic
+        const dayDiff = target.diff(firstOccurrence, 'days')
+        const weekDiff = Math.round(dayDiff / 7)
 
         return weekDiff % schedule.interval_weeks === 0
       }
@@ -535,11 +552,11 @@ export class MeetingHostSchedulesService {
       case HostScheduleType.DATE_RANGE: {
         if (!schedule.date_from || !schedule.date_to) return []
         const result: string[] = []
-        const current = new Date(schedule.date_from + 'T00:00:00Z')
-        const end = new Date(schedule.date_to + 'T00:00:00Z')
-        while (current <= end) {
-          result.push(current.toISOString().slice(0, 10))
-          current.setUTCDate(current.getUTCDate() + 1)
+        const current = moment.utc(schedule.date_from)
+        const end = moment.utc(schedule.date_to)
+        while (current.isSameOrBefore(end)) {
+          result.push(current.format('YYYY-MM-DD'))
+          current.add(1, 'day')
         }
         return result
       }
@@ -554,21 +571,19 @@ export class MeetingHostSchedulesService {
           return []
         }
         const result: string[] = []
-        const anchor = new Date(schedule.recur_start_date + 'T00:00:00Z')
-        const daysUntilFirst = (schedule.day_of_week - anchor.getUTCDay() + 7) % 7
-        const current = new Date(anchor)
-        current.setUTCDate(current.getUTCDate() + daysUntilFirst)
+        const anchor = moment.utc(schedule.recur_start_date)
+        const daysUntilFirst = (schedule.day_of_week - anchor.day() + 7) % 7
+        const current = anchor.clone().add(daysUntilFirst, 'days')
 
-        const twoYearsLater = new Date(anchor)
-        twoYearsLater.setUTCFullYear(twoYearsLater.getUTCFullYear() + 2)
+        const twoYearsLater = anchor.clone().add(2, 'years')
         const endDate = schedule.recur_end_date
-          ? new Date(schedule.recur_end_date + 'T00:00:00Z')
+          ? moment.utc(schedule.recur_end_date)
           : twoYearsLater
-        const cap = endDate < twoYearsLater ? endDate : twoYearsLater
+        const cap = endDate.isBefore(twoYearsLater) ? endDate : twoYearsLater
 
-        while (current <= cap) {
-          result.push(current.toISOString().slice(0, 10))
-          current.setUTCDate(current.getUTCDate() + schedule.interval_weeks * 7)
+        while (current.isSameOrBefore(cap)) {
+          result.push(current.format('YYYY-MM-DD'))
+          current.add(schedule.interval_weeks, 'weeks')
         }
         return result
       }

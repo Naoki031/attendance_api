@@ -30,7 +30,7 @@ export class EmployeeRequestsController {
   constructor(private readonly employeeRequestsService: EmployeeRequestsService) {}
 
   @Post()
-  @Permissions('create')
+  @Permissions('all_privileges', 'create')
   create(
     @Body(ValidationPipe) createDto: CreateEmployeeRequestDto,
     @User() requestingUser: UserEntity,
@@ -39,7 +39,7 @@ export class EmployeeRequestsController {
   }
 
   @Get()
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   findAll(
     @Query(ValidationPipe) filterDto: FilterEmployeeRequestDto,
     @User() requestingUser: UserEntity,
@@ -58,13 +58,13 @@ export class EmployeeRequestsController {
   }
 
   @Get('pending-count')
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   getPendingCount(@User() requestingUser: UserEntity) {
     return this.employeeRequestsService.getPendingCount(requestingUser.id)
   }
 
   @Get('can-approve')
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   async canApprove(@User() requestingUser: UserEntity) {
     const canApprove = await this.employeeRequestsService.isCompanyApprover(requestingUser.id)
     return { canApprove }
@@ -79,7 +79,7 @@ export class EmployeeRequestsController {
   }
 
   @Get(':id')
-  @Permissions('read')
+  @Permissions('all_privileges', 'read')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.employeeRequestsService.findOne(id)
   }
@@ -94,7 +94,7 @@ export class EmployeeRequestsController {
   }
 
   @Put(':id/approve')
-  @Permissions('update')
+  @Permissions('all_privileges', 'update')
   approve(
     @Param('id', ParseIntPipe) id: number,
     @Body(ValidationPipe) approveDto: ApproveEmployeeRequestDto,

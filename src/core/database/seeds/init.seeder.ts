@@ -7,6 +7,7 @@ import AdminSeeder from './admin.seeder'
 import PermissionGroupSeeder from './permission_group.seeder'
 import UserGroupPermissionSeeder from './user_group_permission.seeder'
 import ExampleUsersSeeder from './example_users.seeder'
+import EmailTemplateSeeder from './email_template.seeder'
 
 export default class InitSeeder implements Seeder {
   public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<void> {
@@ -19,6 +20,7 @@ export default class InitSeeder implements Seeder {
         PermissionGroupSeeder,
         UserGroupPermissionSeeder,
         ExampleUsersSeeder,
+        EmailTemplateSeeder,
       ],
     })
   }

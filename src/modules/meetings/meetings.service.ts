@@ -104,12 +104,14 @@ export class MeetingsService {
         plain_password?: string
       }
     } catch (error) {
-      this.logger.error('Failed to create meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to create meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to create meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to create meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -137,12 +139,14 @@ export class MeetingsService {
 
       return { plain_password: plainPassword }
     } catch (error) {
-      this.logger.error('Failed to generate meeting password', error)
-      this.errorLogsService.logError({
-        message: 'Failed to generate meeting password',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to generate meeting password', error)
+        this.errorLogsService.logError({
+          message: 'Failed to generate meeting password',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -219,12 +223,14 @@ export class MeetingsService {
         })
       })
     } catch (error) {
-      this.logger.error('Failed to find all meetings', error)
-      this.errorLogsService.logError({
-        message: 'Failed to find all meetings',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to find all meetings', error)
+        this.errorLogsService.logError({
+          message: 'Failed to find all meetings',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -243,12 +249,14 @@ export class MeetingsService {
         .orIgnore()
         .execute()
     } catch (error) {
-      this.logger.error('Failed to pin meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to pin meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to pin meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to pin meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -261,12 +269,14 @@ export class MeetingsService {
       const meeting = await this.findByUuid(uuid)
       await this.meetingPinRepository.delete({ user_id: userId, meeting_id: meeting.id })
     } catch (error) {
-      this.logger.error('Failed to unpin meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to unpin meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to unpin meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to unpin meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -302,12 +312,14 @@ export class MeetingsService {
 
       return this.usersService.findWithFilters({ companyIds })
     } catch (error) {
-      this.logger.error('Failed to find users for meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to find users for meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to find users for meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to find users for meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -382,12 +394,14 @@ export class MeetingsService {
 
       return withCompanies ?? saved
     } catch (error) {
-      this.logger.error('Failed to update meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to update meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to update meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to update meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -407,12 +421,14 @@ export class MeetingsService {
 
       await this.meetingRepository.remove(meeting)
     } catch (error) {
-      this.logger.error('Failed to remove meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to remove meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to remove meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to remove meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -477,12 +493,14 @@ export class MeetingsService {
 
       return jwt
     } catch (error) {
-      this.logger.error('Failed to generate meeting token', error)
-      this.errorLogsService.logError({
-        message: 'Failed to generate meeting token',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to generate meeting token', error)
+        this.errorLogsService.logError({
+          message: 'Failed to generate meeting token',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -494,12 +512,14 @@ export class MeetingsService {
         { left_at: moment().toDate() },
       )
     } catch (error) {
-      this.logger.error('Failed to record participant leave', error)
-      this.errorLogsService.logError({
-        message: 'Failed to record participant leave',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to record participant leave', error)
+        this.errorLogsService.logError({
+          message: 'Failed to record participant leave',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -512,12 +532,14 @@ export class MeetingsService {
         { status: MeetingStatus.ACTIVE, started_at: moment().toDate() },
       )
     } catch (error) {
-      this.logger.error('Failed to set meeting active', error)
-      this.errorLogsService.logError({
-        message: 'Failed to set meeting active',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to set meeting active', error)
+        this.errorLogsService.logError({
+          message: 'Failed to set meeting active',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -530,12 +552,14 @@ export class MeetingsService {
         { status: MeetingStatus.SCHEDULED },
       )
     } catch (error) {
-      this.logger.error('Failed to reset meeting to scheduled', error)
-      this.errorLogsService.logError({
-        message: 'Failed to reset meeting to scheduled',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to reset meeting to scheduled', error)
+        this.errorLogsService.logError({
+          message: 'Failed to reset meeting to scheduled',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -555,12 +579,14 @@ export class MeetingsService {
       }
       await this.participantRepository.update({ meeting_id: meetingId, user_id: userId }, { role })
     } catch (error) {
-      this.logger.error('Failed to update participant role', error)
-      this.errorLogsService.logError({
-        message: 'Failed to update participant role',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to update participant role', error)
+        this.errorLogsService.logError({
+          message: 'Failed to update participant role',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -574,12 +600,14 @@ export class MeetingsService {
       })
       return coHosts.map((participant) => participant.user_id)
     } catch (error) {
-      this.logger.error('Failed to get co-host user IDs', error)
-      this.errorLogsService.logError({
-        message: 'Failed to get co-host user IDs',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to get co-host user IDs', error)
+        this.errorLogsService.logError({
+          message: 'Failed to get co-host user IDs',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -763,12 +791,14 @@ export class MeetingsService {
         relations: ['user'],
       })
     } catch (error) {
-      this.logger.error('Failed to create meeting invites', error)
-      this.errorLogsService.logError({
-        message: 'Failed to create meeting invites',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to create meeting invites', error)
+        this.errorLogsService.logError({
+          message: 'Failed to create meeting invites',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -784,12 +814,14 @@ export class MeetingsService {
         { status: MeetingInviteStatus.MISSED },
       )
     } catch (error) {
-      this.logger.error('Failed to mark invite as missed', error)
-      this.errorLogsService.logError({
-        message: 'Failed to mark invite as missed',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to mark invite as missed', error)
+        this.errorLogsService.logError({
+          message: 'Failed to mark invite as missed',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -814,12 +846,14 @@ export class MeetingsService {
         order: { created_at: 'ASC' },
       })
     } catch (error) {
-      this.logger.error('Failed to get meeting invites', error)
-      this.errorLogsService.logError({
-        message: 'Failed to get meeting invites',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to get meeting invites', error)
+        this.errorLogsService.logError({
+          message: 'Failed to get meeting invites',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -855,12 +889,14 @@ export class MeetingsService {
       )
       return (await this.inviteRepository.findOne({ where: { id: invite.id } })) as MeetingInvite
     } catch (error) {
-      this.logger.error('Failed to record RSVP', error)
-      this.errorLogsService.logError({
-        message: 'Failed to record RSVP',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to record RSVP', error)
+        this.errorLogsService.logError({
+          message: 'Failed to record RSVP',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -891,12 +927,14 @@ export class MeetingsService {
 
       return invite ? { inviteId: invite.id, meetingId: meeting.id } : null
     } catch (error) {
-      this.logger.error('Failed to cancel invite', error)
-      this.errorLogsService.logError({
-        message: 'Failed to cancel invite',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to cancel invite', error)
+        this.errorLogsService.logError({
+          message: 'Failed to cancel invite',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -931,12 +969,14 @@ export class MeetingsService {
             : moment().toISOString(),
         }))
     } catch (error) {
-      this.logger.error('Failed to get missed invites', error)
-      this.errorLogsService.logError({
-        message: 'Failed to get missed invites',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to get missed invites', error)
+        this.errorLogsService.logError({
+          message: 'Failed to get missed invites',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -953,12 +993,14 @@ export class MeetingsService {
         order: { created_at: 'DESC' },
       })
     } catch (error) {
-      this.logger.error('Failed to get pending invites', error)
-      this.errorLogsService.logError({
-        message: 'Failed to get pending invites',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to get pending invites', error)
+        this.errorLogsService.logError({
+          message: 'Failed to get pending invites',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -973,12 +1015,14 @@ export class MeetingsService {
         where: { meeting_id: meeting.id, user_id: userId },
       })
     } catch (error) {
-      this.logger.error('Failed to get user invite for meeting', error)
-      this.errorLogsService.logError({
-        message: 'Failed to get user invite for meeting',
-        stackTrace: (error as Error).stack ?? null,
-        path: 'meetings',
-      })
+      if (!(error instanceof HttpException)) {
+        this.logger.error('Failed to get user invite for meeting', error)
+        this.errorLogsService.logError({
+          message: 'Failed to get user invite for meeting',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'meetings',
+        })
+      }
       throw error
     }
   }
@@ -1011,9 +1055,22 @@ export class MeetingsService {
    */
   async getCoHosts(
     meetingUuid: string,
+    requesterId?: number,
+    requesterRoles?: string[],
   ): Promise<Array<{ user_id: number; full_name: string; avatar: string | null }>> {
     try {
       const meeting = await this.findByUuid(meetingUuid)
+
+      // Only host, co-host, participant, or admin can view co-hosts
+      if (requesterId && requesterRoles) {
+        const isPrivileged = isPrivilegedUser(requesterRoles)
+        if (!isPrivileged && meeting.host_id !== requesterId) {
+          const participant = await this.participantRepository.findOne({
+            where: { meeting_id: meeting.id, user_id: requesterId },
+          })
+          if (!participant) throw new ForbiddenException('Not a participant of this meeting')
+        }
+      }
 
       const coHosts = await this.participantRepository.find({
         where: { meeting_id: meeting.id, role: MeetingParticipantRole.CO_HOST },

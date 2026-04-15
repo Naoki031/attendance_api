@@ -117,7 +117,7 @@ export class AttendanceLogsService {
    * Returns current date and time in the timezone of the company the user belongs to.
    * Falls back to Vietnam timezone (UTC+7) if no timezone is configured.
    */
-  private async getDateTimeForUser(userId: number): Promise<{ date: string; time: string }> {
+  public async getDateTimeForUser(userId: number): Promise<{ date: string; time: string }> {
     const companyId = await this.getUserCompanyId(userId)
 
     if (companyId) {
@@ -273,7 +273,7 @@ export class AttendanceLogsService {
    * Resolves the effective work schedule for a user on a given date.
    * Returns custom schedule if one is active, otherwise falls back to company default.
    */
-  private async resolveSchedule(
+  public async resolveSchedule(
     userId: number,
     date: string,
   ): Promise<{

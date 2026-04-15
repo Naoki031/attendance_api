@@ -3,6 +3,8 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
+  DeleteDateColumn,
   ManyToOne,
   JoinColumn,
 } from 'typeorm'
@@ -136,9 +138,9 @@ export class EmployeeRequest {
   @CreateDateColumn({ nullable: true, name: 'created_at' })
   created_at?: Date
 
-  @CreateDateColumn({ nullable: true, name: 'updated_at' })
+  @UpdateDateColumn({ nullable: true, name: 'updated_at' })
   updated_at?: Date
 
-  @CreateDateColumn({ nullable: true, name: 'deleted_at' })
+  @DeleteDateColumn({ nullable: true, name: 'deleted_at' })
   deleted_at?: Date
 }

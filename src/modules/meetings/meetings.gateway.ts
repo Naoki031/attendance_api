@@ -324,12 +324,14 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
           })
 
           // Resolve scheduled host for today and set as runtime host.
-          // When no schedule exists (null), fall back to the first joiner.
+          // When no schedule exists, fall back to the meeting's permanent host from DB.
+          // Only use the first joiner as a last resort (should never happen).
           const today = moment().format('YYYY-MM-DD')
           const scheduledHostId = await this.hostSchedulesService
             .resolveHostForDate(payload.meetingId, today)
             .catch(() => null)
-          const resolvedHostId = scheduledHostId ?? userId
+          const permanentHostId = await this.meetingsService.findHostIdById(payload.meetingId)
+          const resolvedHostId = scheduledHostId ?? permanentHostId ?? userId
           this.runtimeHosts.set(payload.meetingId, resolvedHostId)
           this.server.to(`meeting_${payload.meetingId}`).emit('host_changed', {
             meetingId: payload.meetingId,
@@ -823,9 +825,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   @SubscribeMessage('screen_marker_clear')
   handleScreenMarkerClear(
-    @ConnectedSocket() _client: Socket,
+    @ConnectedSocket() client: Socket,
     @MessageBody() payload: { meetingId: number },
   ) {
+    const participant = this.activeParticipants.get(payload.meetingId)?.get(client.id)
+    if (!participant) return
+
     this.server.to(`meeting_${payload.meetingId}`).emit('screen_marker_clear')
   }
 
@@ -990,9 +995,12 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   @SubscribeMessage('annotation_clear')
   handleAnnotationClear(
-    @ConnectedSocket() _client: Socket,
+    @ConnectedSocket() client: Socket,
     @MessageBody() payload: AnnotationClearPayload,
   ) {
+    const participant = this.activeParticipants.get(payload.meetingId)?.get(client.id)
+    if (!participant) return
+
     // Broadcast clear to all participants including sender for consistency
     this.server.to(`meeting_${payload.meetingId}`).emit('annotation_clear')
   }

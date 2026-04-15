@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as nodemailer from 'nodemailer'
 import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
+import { EmailTemplatesService } from '@/modules/email_templates/email_templates.service'
+import { escapeHtml } from '@/common/utils/escape-html.utility'
 
 export interface SendMailOptions {
   to: string
@@ -17,19 +19,25 @@ export class MailService {
   constructor(
     private readonly configService: ConfigService,
     private readonly errorLogsService: ErrorLogsService,
+    private readonly emailTemplatesService: EmailTemplatesService,
   ) {
     // ConfigService.get() always returns a string from env vars — parse explicitly
     const secure = this.configService.get('MAIL_SECURE') === 'true'
     const port = Number(this.configService.get('MAIL_PORT') ?? 587)
+    const mailUser = this.configService.get<string>('MAIL_USER', '')
+    const mailPass = this.configService.get<string>('MAIL_PASS', '')
     this.transporter = nodemailer.createTransport({
       host: this.configService.get<string>('MAIL_HOST', 'smtp.gmail.com'),
       port,
       secure,
-      ignoreTLS: !secure,
-      auth: {
-        user: this.configService.get<string>('MAIL_USER', ''),
-        pass: this.configService.get<string>('MAIL_PASS', ''),
-      },
+      ...(mailUser
+        ? {
+            auth: {
+              user: mailUser,
+              pass: mailPass,
+            },
+          }
+        : {}),
     })
   }
 
@@ -54,5 +62,49 @@ export class MailService {
         path: 'mail',
       })
     }
+  }
+
+  /**
+   * Sends an email using a DB-backed template identified by key.
+   * Looks up company-specific template first, then falls back to global.
+   * If no template is found, the email is silently skipped.
+   * Variables use {{variable_name}} syntax. All variable values are HTML-escaped.
+   */
+  async sendTemplate(
+    templateKey: string,
+    to: string,
+    variables: Record<string, string>,
+    companyId?: number,
+  ): Promise<void> {
+    try {
+      const template = await this.emailTemplatesService.findByKey(templateKey, companyId)
+      if (!template) {
+        this.logger.warn(`Email template "${templateKey}" not found — skipping email to ${to}`)
+        return
+      }
+
+      const subject = this.renderVariables(template.subject, variables)
+      const html = this.renderVariables(template.body_html, variables)
+      await this.send({ to, subject, html })
+    } catch (error) {
+      this.logger.error(
+        `Failed to send template email "${templateKey}" to ${to}: ${(error as Error).message}`,
+      )
+      this.errorLogsService.logError({
+        message: `Failed to send template email "${templateKey}" to ${to}: ${(error as Error).message}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'mail',
+      })
+    }
+  }
+
+  /**
+   * Replaces {{variable}} placeholders with HTML-escaped values.
+   * Unmatched placeholders are left as-is so the recipient sees what's missing.
+   */
+  private renderVariables(template: string, variables: Record<string, string>): string {
+    return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
+      return variables[key] !== undefined ? escapeHtml(variables[key]) : _match
+    })
   }
 }

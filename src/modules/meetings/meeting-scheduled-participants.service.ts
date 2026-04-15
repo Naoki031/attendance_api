@@ -79,8 +79,23 @@ export class MeetingScheduledParticipantsService {
   /**
    * Returns all scheduled participants for a meeting, including user details.
    */
-  async findAll(meetingUuid: string): Promise<MeetingScheduledParticipant[]> {
+  async findAll(
+    meetingUuid: string,
+    requesterId?: number,
+    requesterRoles?: string[],
+  ): Promise<MeetingScheduledParticipant[]> {
     const meeting = await this.getMeeting(meetingUuid)
+
+    if (requesterId && requesterRoles) {
+      const isPrivileged = isPrivilegedUser(requesterRoles)
+      if (!isPrivileged && meeting.host_id !== requesterId) {
+        const participant = await this.scheduledParticipantRepository.findOne({
+          where: { meeting_id: meeting.id, user_id: requesterId },
+        })
+        if (!participant) throw new ForbiddenException('Not a participant of this meeting')
+      }
+    }
+
     return this.scheduledParticipantRepository.find({
       where: { meeting_id: meeting.id },
       relations: ['user'],
@@ -133,9 +148,12 @@ export class MeetingScheduledParticipantsService {
     })
 
     // Send RSVP emails (fire-and-forget) and push real-time invite via WebSocket
+    // Resolve company_id once — all participants share the same meeting/host
+    const companyId = await this.resolveCompanyId(meeting.host_id)
+
     for (const participant of withUsers) {
       if (participant.user?.email && participant.rsvp_token) {
-        this.sendRsvpEmail(participant, meeting).catch((error) => {
+        this.sendRsvpEmail(participant, meeting, companyId).catch((error) => {
           this.logger.error(
             `Failed to send RSVP email to user ${participant.user_id}: ${(error as Error).message}`,
           )
@@ -177,28 +195,15 @@ export class MeetingScheduledParticipantsService {
   }
 
   /**
-   * Escapes HTML special characters to prevent HTML injection in email body.
-   */
-  private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
-  }
-
-  /**
-   * Sends the RSVP email with accept/decline links.
+   * Sends the RSVP email using a DB-backed email template.
+   * Falls back to the global template if no company-specific one exists.
    */
   private async sendRsvpEmail(
     participant: MeetingScheduledParticipant,
     meeting: Meeting,
+    companyId?: number,
   ): Promise<void> {
     const clientUrl = this.configService.get<string>('CLIENT_URL', 'http://localhost')
-    const userName = this.escapeHtml(participant.user?.full_name ?? 'there')
-    const title = this.escapeHtml(meeting.title)
-    const description = meeting.description ? this.escapeHtml(meeting.description) : null
     // scheduled_at is stored as UTC on the server — use moment.utc() to parse correctly
     const scheduledAt = meeting.scheduled_at
       ? moment.utc(meeting.scheduled_at).local().format('dddd, MMMM D YYYY [at] HH:mm')
@@ -207,25 +212,30 @@ export class MeetingScheduledParticipantsService {
     const acceptUrl = `${clientUrl}/meetings/rsvp?token=${participant.rsvp_token}&status=accepted`
     const declineUrl = `${clientUrl}/meetings/rsvp?token=${participant.rsvp_token}&status=declined`
 
-    await this.mailService.send({
-      to: participant.user!.email!,
-      subject: `Meeting invitation: ${meeting.title}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>You have been invited to a meeting</h2>
-          <p>Hi ${userName},</p>
-          <p>You have been invited to: <strong>${title}</strong></p>
-          <p><strong>When:</strong> ${scheduledAt}</p>
-          ${description ? `<p><strong>Description:</strong> ${description}</p>` : ''}
-          <p>Please respond to this invitation:</p>
-          <div style="margin: 24px 0;">
-            <a href="${acceptUrl}" style="background:#4caf50;color:#fff;padding:12px 24px;border-radius:4px;text-decoration:none;margin-right:8px;">Accept</a>
-            <a href="${declineUrl}" style="background:#f44336;color:#fff;padding:12px 24px;border-radius:4px;text-decoration:none;">Decline</a>
-          </div>
-          <p style="color:#999;font-size:12px;">This link is single-use and will expire after you respond.</p>
-        </div>
-      `,
-    })
+    await this.mailService.sendTemplate(
+      'meeting_invite_rsvp',
+      participant.user!.email!,
+      {
+        user_name: participant.user?.full_name ?? 'there',
+        meeting_title: meeting.title,
+        scheduled_at: scheduledAt,
+        description: meeting.description ?? '',
+        accept_url: acceptUrl,
+        decline_url: declineUrl,
+      },
+      companyId,
+    )
+  }
+
+  /**
+   * Resolves the company_id for a user via their department assignment.
+   */
+  private async resolveCompanyId(userId: number): Promise<number | undefined> {
+    const rows = (await this.meetingRepository.query(
+      'SELECT company_id FROM user_departments WHERE user_id = ? LIMIT 1',
+      [userId],
+    )) as Array<{ company_id: number }>
+    return rows.length > 0 ? rows[0].company_id : undefined
   }
 
   /**
@@ -314,8 +324,23 @@ export class MeetingScheduledParticipantsService {
   /**
    * Returns the auto-call config for a meeting, or null if not set.
    */
-  async getAutoCallConfig(meetingUuid: string): Promise<MeetingAutoCallConfig | null> {
+  async getAutoCallConfig(
+    meetingUuid: string,
+    requesterId?: number,
+    requesterRoles?: string[],
+  ): Promise<MeetingAutoCallConfig | null> {
     const meeting = await this.getMeeting(meetingUuid)
+
+    if (requesterId && requesterRoles) {
+      const isPrivileged = isPrivilegedUser(requesterRoles)
+      if (!isPrivileged && meeting.host_id !== requesterId) {
+        const participant = await this.scheduledParticipantRepository.findOne({
+          where: { meeting_id: meeting.id, user_id: requesterId },
+        })
+        if (!participant) throw new ForbiddenException('Not a participant of this meeting')
+      }
+    }
+
     return this.autoCallConfigRepository.findOne({ where: { meeting_id: meeting.id } }) ?? null
   }
 

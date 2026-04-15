@@ -26,6 +26,8 @@ import { EventsGateway } from '@/modules/events/events.gateway'
 import { AttendanceLogsService } from '@/modules/attendance_logs/attendance_logs.service'
 import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { isPrivilegedUser } from '@/common/utils/is-privileged.utility'
+import { MailService } from '@/modules/mail/mail.service'
+import { ConfigService } from '@nestjs/config'
 
 @Injectable()
 export class EmployeeRequestsService {
@@ -48,6 +50,8 @@ export class EmployeeRequestsService {
     private readonly eventsGateway: EventsGateway,
     private readonly attendanceLogsService: AttendanceLogsService,
     private readonly errorLogsService: ErrorLogsService,
+    private readonly mailService: MailService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -148,39 +152,70 @@ export class EmployeeRequestsService {
         )
         await this.slackChannelsService.sendMessage(feature, slackMessage, companyId ?? undefined)
 
-        // Append row to Google Sheet and store the row index for later approval update
-        if (companyId) {
-          const rowIndex = await this.googleSheetsService.appendRequestRow(
-            requestWithUser,
-            companyId,
-            requestWithUser.type,
-          )
-          if (rowIndex) {
-            await this.employeeRequestRepository.update(
-              { id: created.id },
-              { sheet_row_index: rowIndex },
+        // Append row to Google Sheet — failure should not block the request flow
+        try {
+          if (companyId) {
+            const rowIndex = await this.googleSheetsService.appendRequestRow(
+              requestWithUser,
+              companyId,
+              requestWithUser.type,
             )
+            if (rowIndex) {
+              await this.employeeRequestRepository.update(
+                { id: created.id },
+                { sheet_row_index: rowIndex },
+              )
+            }
           }
+        } catch (error) {
+          this.logger.error(
+            `[Google Sheets] Failed to append row for request #${created.id}: ${(error as Error).message}`,
+          )
         }
 
-        // Create Google Calendar event(s) in the company's calendar
-        const calendarId = await this.getCompanyCalendarId(requestingUser.id)
-        if (calendarId) {
-          const calendarEventId = await this.googleCalendarService.createEvents(
-            requestWithUser,
-            calendarId,
-          )
-          if (calendarEventId) {
-            await this.employeeRequestRepository.update(
-              { id: created.id },
-              { calendar_event_id: calendarEventId },
+        // Create Google Calendar event(s) — failure should not block the request flow
+        try {
+          const calendarId = await this.getCompanyCalendarId(requestingUser.id)
+          if (calendarId) {
+            const calendarEventId = await this.googleCalendarService.createEvents(
+              requestWithUser,
+              calendarId,
             )
+            if (calendarEventId) {
+              await this.employeeRequestRepository.update(
+                { id: created.id },
+                { calendar_event_id: calendarEventId },
+              )
+            }
           }
+        } catch (error) {
+          this.logger.error(
+            `[Google Calendar] Failed to create event for request #${created.id}: ${(error as Error).message}`,
+          )
         }
 
         // Notify all users in the same company via WebSocket
         if (companyId) {
           this.eventsGateway.emitRequestCreated(companyId, requestWithUser)
+        }
+
+        // Send email notification to approvers using per-type template
+        const templateKey = `request_submitted_${createDto.type}`
+        const requesterName = requestWithUser.user?.full_name ?? requestingUser.email
+        const clientUrl = this.configService.get<string>('CLIENT_URL', 'http://localhost')
+        const approvalUrl = `${clientUrl}/management/approvals`
+        const variables = this.buildSubmitVariables(requestWithUser, requesterName, approvalUrl)
+
+        for (const approver of approvers) {
+          if (approver.email) {
+            this.mailService
+              .sendTemplate(templateKey, approver.email, variables, companyId ?? undefined)
+              .catch((error) => {
+                this.logger.error(
+                  `Failed to send ${templateKey} email to ${approver.email}: ${(error as Error).message}`,
+                )
+              })
+          }
         }
       }
 
@@ -459,6 +494,48 @@ export class EmployeeRequestsService {
     const companyId = await this.getCompanyId(request.user_id)
     if (companyId) {
       this.eventsGateway.emitRequestUpdated(companyId, approvedRequest)
+    }
+
+    // Send email notification to the requester using DB-backed template
+    if (approvedRequest.user?.email) {
+      const templateKey =
+        approveDto.status === EmployeeRequestStatus.APPROVED
+          ? 'request_approved'
+          : 'request_rejected'
+      const requesterName = approvedRequest.user?.full_name ?? approvedRequest.user.email
+      const approverUser = await this.userRepository.findOne({ where: { id: approvingUser.id } })
+      const requestTypeLabel = this.typeLabel(approvedRequest.type)
+      const dateFrom = approvedRequest.from_datetime
+        ? moment.utc(approvedRequest.from_datetime).format('YYYY-MM-DD HH:mm')
+        : '—'
+      const dateTo = approvedRequest.to_datetime
+        ? moment.utc(approvedRequest.to_datetime).format('YYYY-MM-DD HH:mm')
+        : '—'
+
+      this.mailService
+        .sendTemplate(
+          templateKey,
+          approvedRequest.user.email,
+          {
+            user_name: requesterName,
+            request_type: requestTypeLabel,
+            date_from: dateFrom,
+            date_to: dateTo,
+            approver_name: approverUser?.full_name ?? approvingUser.email,
+            note: approveDto.note ?? '',
+          },
+          companyId ?? undefined,
+        )
+        .catch((error) => {
+          this.logger.error(
+            `Failed to send ${templateKey} email to ${approvedRequest.user!.email}: ${(error as Error).message}`,
+          )
+          this.errorLogsService.logError({
+            message: `Failed to send ${templateKey} email for request #${approvedRequest.id}`,
+            stackTrace: (error as Error).stack ?? null,
+            path: 'employee_requests',
+          })
+        })
     }
 
     return approvedRequest
@@ -869,5 +946,73 @@ export class EmployeeRequestsService {
     }
 
     return map[type]
+  }
+
+  /**
+   * Returns a human-readable label for an employee request type.
+   */
+  private typeLabel(type: EmployeeRequestType): string {
+    const labels: Record<EmployeeRequestType, string> = {
+      [EmployeeRequestType.OFF]: 'Leave Request',
+      [EmployeeRequestType.WFH]: 'Work From Home',
+      [EmployeeRequestType.OVERTIME]: 'Overtime',
+      [EmployeeRequestType.EQUIPMENT]: 'Equipment',
+      [EmployeeRequestType.CLOCK_FORGET]: 'Clock Forget',
+      [EmployeeRequestType.BUSINESS_TRIP]: 'Business Trip',
+    }
+    return labels[type] ?? type
+  }
+
+  /**
+   * Builds template variables for request_submitted_{type} email templates.
+   * Each request type uses a different set of variables matching its template.
+   */
+  private buildSubmitVariables(
+    request: EmployeeRequest,
+    requesterName: string,
+    approvalUrl: string,
+  ): Record<string, string> {
+    const dateFrom = request.from_datetime
+      ? moment.utc(request.from_datetime).format('YYYY-MM-DD HH:mm')
+      : ''
+    const dateTo = request.to_datetime
+      ? moment.utc(request.to_datetime).format('YYYY-MM-DD HH:mm')
+      : ''
+
+    const base: Record<string, string> = {
+      user_name: requesterName,
+      approval_url: approvalUrl,
+    }
+
+    switch (request.type) {
+      case EmployeeRequestType.OFF:
+      case EmployeeRequestType.WFH:
+      case EmployeeRequestType.OVERTIME:
+        return { ...base, date_from: dateFrom, date_to: dateTo, reason: request.reason ?? '' }
+      case EmployeeRequestType.EQUIPMENT:
+        return {
+          ...base,
+          item_name: request.equipment_name ?? '',
+          reason: request.reason ?? '',
+        }
+      case EmployeeRequestType.CLOCK_FORGET:
+        return {
+          ...base,
+          target_date: request.forget_date ?? '',
+          clock_in_time: dateFrom ? dateFrom.substring(11) : '',
+          clock_out_time: dateTo ? dateTo.substring(11) : '',
+          reason: request.reason ?? '',
+        }
+      case EmployeeRequestType.BUSINESS_TRIP:
+        return {
+          ...base,
+          date_from: dateFrom,
+          date_to: dateTo,
+          destination: request.trip_destination ?? '',
+          reason: request.reason ?? '',
+        }
+      default:
+        return base
+    }
   }
 }

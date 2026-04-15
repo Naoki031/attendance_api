@@ -35,8 +35,8 @@ export class MeetingScheduledParticipantsController {
    */
   @Get(':uuid/scheduled-participants')
   @Permissions('all_privileges', 'read')
-  findAll(@Param('uuid') uuid: string) {
-    return this.scheduledParticipantsService.findAll(uuid)
+  findAll(@Param('uuid') uuid: string, @UserDecorator() user: User) {
+    return this.scheduledParticipantsService.findAll(uuid, user.id, user.roles)
   }
 
   /**
@@ -96,8 +96,8 @@ export class MeetingScheduledParticipantsController {
    */
   @Get(':uuid/auto-call-config')
   @Permissions('all_privileges', 'read')
-  getAutoCallConfig(@Param('uuid') uuid: string) {
-    return this.scheduledParticipantsService.getAutoCallConfig(uuid)
+  getAutoCallConfig(@Param('uuid') uuid: string, @UserDecorator() user: User) {
+    return this.scheduledParticipantsService.getAutoCallConfig(uuid, user.id, user.roles)
   }
 
   /**

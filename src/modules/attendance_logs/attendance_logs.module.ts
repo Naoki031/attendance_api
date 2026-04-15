@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config'
 import { AttendanceLog } from './entities/attendance_log.entity'
 import { AttendanceLogEdit } from './entities/attendance_log_edit.entity'
 import { AttendanceLogsService } from './attendance_logs.service'
+import { AttendanceReminderService } from './attendance_reminder.service'
 import { AttendanceLogsController } from './attendance_logs.controller'
 import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/user_group_permissions.module'
 import { EmployeeRequest } from '@/modules/employee_requests/entities/employee_request.entity'
@@ -37,7 +38,7 @@ import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
     ErrorLogsModule,
   ],
   controllers: [AttendanceLogsController],
-  providers: [AttendanceLogsService],
+  providers: [AttendanceLogsService, AttendanceReminderService],
   exports: [AttendanceLogsService],
 })
 export class AttendanceLogsModule {}
