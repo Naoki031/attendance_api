@@ -235,6 +235,36 @@ const defaultTemplates: Partial<EmailTemplate>[] = [
     is_system: true,
     company_id: null,
   },
+  {
+    key: 'contract_expiry_reminder',
+    subject: 'Contract expiry reminder: {{employee_name}} — {{days_remaining}} day(s) remaining',
+    body_html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+  <h2>Contract Expiry Reminder</h2>
+  <p>Hi {{admin_name}},</p>
+  <p>This is a reminder that the contract of <strong>{{employee_name}}</strong> is about to expire.</p>
+  <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
+    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Contract Type</td><td style="padding: 8px; border: 1px solid #ddd;">{{contract_type}}</td></tr>
+    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Expiry Date</td><td style="padding: 8px; border: 1px solid #ddd;">{{expired_date}}</td></tr>
+    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Days Remaining</td><td style="padding: 8px; border: 1px solid #ddd;"><strong>{{days_remaining}} day(s)</strong></td></tr>
+  </table>
+  <p>Please review and take action before the contract expires.</p>
+  <div style="margin: 24px 0;">
+    <a href="{{profile_url}}" style="background:#1976d2;color:#fff;padding:12px 24px;border-radius:4px;text-decoration:none;">View Employee Profile</a>
+  </div>
+  <p style="color:#999;font-size:12px;">This is an automated reminder sent by the Attendance system.</p>
+</div>`,
+    description: 'Sent to company admins when an employee contract is about to expire',
+    variables: [
+      'admin_name',
+      'employee_name',
+      'contract_type',
+      'expired_date',
+      'days_remaining',
+      'profile_url',
+    ],
+    is_system: true,
+    company_id: null,
+  },
 ]
 
 export default class EmailTemplateSeeder implements Seeder {

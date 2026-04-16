@@ -137,4 +137,16 @@ export const TEMPLATE_KEYS: TemplateKeyDefinition[] = [
       { name: 'clock_url', description: 'Link to the attendance page for clock-out' },
     ],
   },
+  {
+    key: 'contract_expiry_reminder',
+    description: 'Sent to company admins when an employee contract is about to expire',
+    variables: [
+      { name: 'admin_name', description: 'Admin full name' },
+      { name: 'employee_name', description: 'Employee full name' },
+      { name: 'contract_type', description: 'Contract type (Probation / Fixed Term)' },
+      { name: 'expired_date', description: 'Contract expiry date (YYYY-MM-DD)' },
+      { name: 'days_remaining', description: 'Days remaining until expiry' },
+      { name: 'profile_url', description: 'Link to employee profile page' },
+    ],
+  },
 ]

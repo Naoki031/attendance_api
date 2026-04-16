@@ -146,6 +146,31 @@ export class User {
   contract_count?: number
 
   @Column({
+    nullable: false,
+    name: 'contract_expiry_reminder_days',
+    type: 'int',
+    default: 30,
+    comment: 'Days before contract expiry to send reminder notification and email',
+  })
+  contract_expiry_reminder_days!: number
+
+  @Column({
+    type: 'date',
+    nullable: true,
+    name: 'contract_reminder_last_sent_at',
+    comment: 'Date when last contract expiry reminder was sent to company admins',
+    transformer: {
+      to: (value: string | null) => value ?? null,
+      from: (value: Date | string | null) => {
+        if (!value) return null
+        if (value instanceof Date) return moment.utc(value).format('YYYY-MM-DD')
+        return String(value).slice(0, 10)
+      },
+    },
+  })
+  contract_reminder_last_sent_at?: string | null
+
+  @Column({
     nullable: true,
     name: 'annual_leave_hours',
     type: 'decimal',

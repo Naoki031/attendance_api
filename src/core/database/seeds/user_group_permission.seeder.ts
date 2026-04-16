@@ -6,13 +6,11 @@ export default class UserGroupPermissionSeeder implements Seeder {
   public async run(dataSource: DataSource, _factoryManager: SeederFactoryManager): Promise<void> {
     const repository = dataSource.getRepository(UserGroupPermission)
 
-    await repository.insert([
-      {
-        user_id: 1,
-        permission_group_id: 1,
-        created_at: new Date(),
-        updated_at: new Date(),
-      },
-    ])
+    const existing = await repository.findOne({
+      where: { user_id: 1, permission_group_id: 1 },
+    })
+    if (!existing) {
+      await repository.save(repository.create({ user_id: 1, permission_group_id: 1 }))
+    }
   }
 }

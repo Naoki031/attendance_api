@@ -72,6 +72,11 @@ export class CreateUserDto {
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  contract_expiry_reminder_days?: number
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
   annual_leave_hours?: number | null
 
   @IsOptional()
