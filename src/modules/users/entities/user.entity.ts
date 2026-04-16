@@ -1,3 +1,4 @@
+import moment from 'moment'
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm'
 import { UserGroupPermission } from '@/modules/user_group_permissions/entities/user_group_permission.entity'
 import { UserDepartment } from '@/modules/user_departments/entities/user_department.entity'
@@ -73,26 +74,62 @@ export class User {
   avatar?: string
 
   @Column({
+    type: 'date',
     nullable: true,
     name: 'date_of_birth',
+    transformer: {
+      to: (value: string | null) => value ?? null,
+      from: (value: Date | string | null) => {
+        if (!value) return null
+        if (value instanceof Date) return moment.utc(value).format('YYYY-MM-DD')
+        return String(value).slice(0, 10)
+      },
+    },
   })
   date_of_birth?: string
 
   @Column({
+    type: 'date',
     nullable: true,
     name: 'join_date',
+    transformer: {
+      to: (value: string | null) => value ?? null,
+      from: (value: Date | string | null) => {
+        if (!value) return null
+        if (value instanceof Date) return moment.utc(value).format('YYYY-MM-DD')
+        return String(value).slice(0, 10)
+      },
+    },
   })
   join_date?: string
 
   @Column({
+    type: 'date',
     nullable: true,
     name: 'contract_signed_date',
+    transformer: {
+      to: (value: string | null) => value ?? null,
+      from: (value: Date | string | null) => {
+        if (!value) return null
+        if (value instanceof Date) return moment.utc(value).format('YYYY-MM-DD')
+        return String(value).slice(0, 10)
+      },
+    },
   })
   contract_signed_date?: string
 
   @Column({
+    type: 'date',
     nullable: true,
     name: 'contract_expired_date',
+    transformer: {
+      to: (value: string | null) => value ?? null,
+      from: (value: Date | string | null) => {
+        if (!value) return null
+        if (value instanceof Date) return moment.utc(value).format('YYYY-MM-DD')
+        return String(value).slice(0, 10)
+      },
+    },
   })
   contract_expired_date?: string
 
@@ -107,6 +144,26 @@ export class User {
     name: 'contract_count',
   })
   contract_count?: number
+
+  @Column({
+    nullable: true,
+    name: 'annual_leave_hours',
+    type: 'decimal',
+    precision: 6,
+    scale: 2,
+    comment: 'Total annual leave hours allocated for the year',
+  })
+  annual_leave_hours?: number | null
+
+  @Column({
+    nullable: true,
+    name: 'remaining_leave_hours',
+    type: 'decimal',
+    precision: 6,
+    scale: 2,
+    comment: 'Remaining leave hours available for use',
+  })
+  remaining_leave_hours?: number | null
 
   @Column({
     nullable: true,

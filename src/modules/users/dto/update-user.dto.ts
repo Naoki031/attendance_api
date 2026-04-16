@@ -7,7 +7,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator'
-import { Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 
 export class UpdateUserDto {
   @IsOptional()
@@ -65,11 +65,23 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsNumber()
+  @Type(() => Number)
   contract_count?: number
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  annual_leave_hours?: number | null
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  remaining_leave_hours?: number | null
 
   @IsOptional()
   @IsArray()
   @IsNumber({}, { each: true })
+  @Transform(({ value }) => (Array.isArray(value) ? value.filter((id) => id != null) : value))
   permission_group_ids?: number[]
 
   @IsOptional()
