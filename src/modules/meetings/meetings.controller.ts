@@ -84,8 +84,8 @@ export class MeetingsController {
 
   @Get(':uuid/users')
   @Permissions('all_privileges', 'read')
-  findUsersForMeeting(@Param('uuid') uuid: string) {
-    return this.meetingsService.findUsersForMeeting(uuid)
+  findUsersForMeeting(@Param('uuid') uuid: string, @Query('search') search?: string) {
+    return this.meetingsService.findUsersForMeeting(uuid, search)
   }
 
   @Patch(':uuid')

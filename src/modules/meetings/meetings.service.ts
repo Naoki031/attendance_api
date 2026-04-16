@@ -298,7 +298,7 @@ export class MeetingsService {
    * Returns users who belong to the companies associated with this meeting.
    * Used to populate the host schedule user selector.
    */
-  async findUsersForMeeting(uuid: string) {
+  async findUsersForMeeting(uuid: string, search?: string) {
     try {
       const meeting = await this.meetingRepository.findOne({ where: { uuid } })
       if (!meeting) throw new NotFoundException(`Meeting ${uuid} not found`)
@@ -308,9 +308,12 @@ export class MeetingsService {
       })
       const companyIds = companyRows.map((row) => row.company_id)
 
-      if (companyIds.length === 0) return this.usersService.findAll()
+      const users =
+        companyIds.length === 0
+          ? await this.usersService.findWithFilters({ name: search })
+          : await this.usersService.findWithFilters({ companyIds, name: search })
 
-      return this.usersService.findWithFilters({ companyIds })
+      return users.slice(0, 20)
     } catch (error) {
       if (!(error instanceof HttpException)) {
         this.logger.error('Failed to find users for meeting', error)

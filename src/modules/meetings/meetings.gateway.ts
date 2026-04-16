@@ -1320,9 +1320,27 @@ export class MeetingsGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   /**
-   * Notifies all users on the meetings list page that the host schedule for a meeting changed.
+   * Notifies all users on the meetings list page and any active meeting room
+   * that the host schedule for a meeting changed.
+   *
+   * The meetings_list emit is synchronous. The meeting room emit is fire-and-forget
+   * (async UUID→ID lookup) so it never delays the HTTP response.
    */
-  emitHostScheduleChanged(meetingUuid: string) {
+  emitHostScheduleChanged(meetingUuid: string): void {
     this.server.to('meetings_list').emit('host_schedule_changed', { meetingUuid })
+
+    // Also notify participants currently inside the meeting room
+    this.meetingsService
+      .findByUuid(meetingUuid)
+      .then((meeting) => {
+        this.server.to(`meeting_${meeting.id}`).emit('host_schedule_changed', { meetingUuid })
+      })
+      .catch((error) => {
+        // non-critical — list emit already succeeded; log for observability
+        this.logger.warn(
+          `Failed to emit host_schedule_changed to meeting room for ${meetingUuid}`,
+          error,
+        )
+      })
   }
 }
