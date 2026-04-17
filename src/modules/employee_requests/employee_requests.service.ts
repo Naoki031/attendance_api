@@ -277,7 +277,7 @@ export class EmployeeRequestsService {
 
     if (filterDto.search) {
       queryBuilder.andWhere(
-        '(user.full_name LIKE :search OR er.type LIKE :search OR CAST(er.id AS CHAR) LIKE :search)',
+        "(CONCAT(user.first_name, ' ', user.last_name) LIKE :search OR er.type LIKE :search OR CAST(er.id AS CHAR) LIKE :search)",
         { search: `%${filterDto.search}%` },
       )
     }

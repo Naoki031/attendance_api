@@ -10,6 +10,7 @@ import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/user_group_permissions.module'
 import { EventsModule } from '@/modules/events/events.module'
 import { MailModule } from '@/modules/mail/mail.module'
+import { NotificationsModule } from '@/modules/notifications/notifications.module'
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { MailModule } from '@/modules/mail/mail.module'
     UserGroupPermissionsModule,
     EventsModule,
     MailModule,
+    NotificationsModule,
   ],
   controllers: [UserContractsController],
   providers: [UserContractsService, ContractExpiryReminderService],

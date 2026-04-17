@@ -7,6 +7,9 @@ export class ErrorLog {
   @PrimaryGeneratedColumn()
   id!: number
 
+  @Column({ length: 64, nullable: true, unique: true })
+  fingerprint?: string
+
   @Column({ length: 20, default: 'error' })
   level!: ErrorLogLevel
 
@@ -57,6 +60,12 @@ export class ErrorLog {
 
   @Column({ name: 'resolved_at', type: 'timestamp', nullable: true })
   resolved_at?: Date
+
+  @Column({ name: 'occurrence_count', default: 1 })
+  occurrence_count!: number
+
+  @Column({ name: 'last_occurred_at', type: 'timestamp', nullable: true })
+  last_occurred_at?: Date
 
   @CreateDateColumn({ name: 'created_at' })
   created_at!: Date

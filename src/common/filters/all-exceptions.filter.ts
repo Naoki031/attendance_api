@@ -1,5 +1,6 @@
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, Logger } from '@nestjs/common'
 import { Request, Response } from 'express'
+import { createHash } from 'crypto'
 import { DataSource, Repository } from 'typeorm'
 import { ErrorLog } from '@/modules/error_logs/entities/error_log.entity'
 
@@ -90,7 +91,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   /**
+   * Computes a SHA-256 fingerprint for deduplication.
+   * Uses path without query string so ?page=1 and ?page=2 map to the same error.
+   */
+  private computeFingerprint(
+    message: string,
+    method: string,
+    url: string,
+    statusCode: number,
+  ): string {
+    const pathBase = url.split('?')[0] ?? url
+    const raw = `${message}|${method}|${pathBase}|${statusCode}`
+    return createHash('sha256').update(raw).digest('hex')
+  }
+
+  /**
    * Persists an error log entry to the database (fire-and-forget).
+   * Uses INSERT ... ON DUPLICATE KEY UPDATE to deduplicate identical errors:
+   * - First occurrence: insert full record including request body/query
+   * - Subsequent occurrences: increment occurrence_count, re-open if resolved, skip request data
    */
   private persistErrorLog(data: {
     level: 'error' | 'warn' | 'fatal'
@@ -107,31 +126,49 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const sanitizedBody = this.sanitize(data.request.body)
     const sanitizedHeaders = this.sanitize(data.request.headers)
+    const fingerprint = this.computeFingerprint(
+      truncatedMessage,
+      data.request.method,
+      data.request.url ?? '',
+      data.statusCode,
+    )
 
-    const entry = {
-      level: data.level,
-      message: truncatedMessage,
-      stack_trace: data.stackTrace,
-      status_code: data.statusCode,
-      path: data.request.url?.substring(0, 500),
-      method: data.request.method,
-      request_body: sanitizedBody ? JSON.stringify(sanitizedBody).substring(0, 65535) : null,
-      request_query: data.request.query
-        ? JSON.stringify(data.request.query).substring(0, 1000)
-        : null,
-      request_headers: JSON.stringify(sanitizedHeaders).substring(0, 65535),
-      user_id: data.user?.id ? Number(data.user.id) : null,
-      user_email: data.user?.email ? String(data.user.email).substring(0, 255) : null,
-      user_name: data.user?.full_name ? String(data.user.full_name).substring(0, 255) : null,
-      ip_address:
-        (data.request.headers['x-forwarded-for'] as string | undefined) ?? data.request.ip ?? null,
-      user_agent: data.request.headers['user-agent']
+    const sql = `
+      INSERT INTO error_logs
+        (fingerprint, level, message, stack_trace, status_code, path, method,
+         request_body, request_query, request_headers,
+         user_id, user_email, user_name, ip_address, user_agent,
+         is_resolved, occurrence_count, last_occurred_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, NOW())
+      ON DUPLICATE KEY UPDATE
+        occurrence_count = occurrence_count + 1,
+        last_occurred_at = NOW(),
+        is_resolved = 0,
+        resolved_by = NULL,
+        resolved_at = NULL
+    `
+
+    const parameters = [
+      fingerprint,
+      data.level,
+      truncatedMessage,
+      data.stackTrace,
+      data.statusCode,
+      data.request.url?.substring(0, 500) ?? null,
+      data.request.method,
+      sanitizedBody ? JSON.stringify(sanitizedBody).substring(0, 65535) : null,
+      data.request.query ? JSON.stringify(data.request.query).substring(0, 1000) : null,
+      JSON.stringify(sanitizedHeaders).substring(0, 65535),
+      data.user?.id ? Number(data.user.id) : null,
+      data.user?.email ? String(data.user.email).substring(0, 255) : null,
+      data.user?.full_name ? String(data.user.full_name).substring(0, 255) : null,
+      (data.request.headers['x-forwarded-for'] as string | undefined) ?? data.request.ip ?? null,
+      data.request.headers['user-agent']
         ? String(data.request.headers['user-agent']).substring(0, 500)
         : null,
-      is_resolved: false,
-    }
+    ]
 
-    this.errorLogRepository.insert(entry).catch((databaseError) => {
+    this.dataSource.query(sql, parameters).catch((databaseError: unknown) => {
       this.logger.error(
         'Failed to save error log to database',
         databaseError instanceof Error ? databaseError.message : String(databaseError),

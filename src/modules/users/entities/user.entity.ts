@@ -177,6 +177,10 @@ export class User {
     precision: 6,
     scale: 2,
     comment: 'Total annual leave hours allocated for the year',
+    transformer: {
+      to: (value: number | null) => value ?? null,
+      from: (value: string | null) => (value != null ? parseFloat(value) : null),
+    },
   })
   annual_leave_hours?: number | null
 
@@ -187,6 +191,10 @@ export class User {
     precision: 6,
     scale: 2,
     comment: 'Remaining leave hours available for use',
+    transformer: {
+      to: (value: number | null) => value ?? null,
+      from: (value: string | null) => (value != null ? parseFloat(value) : null),
+    },
   })
   remaining_leave_hours?: number | null
 

@@ -98,6 +98,11 @@ export class UsersController {
     return this.usersService.findAll()
   }
 
+  @Get('birthdays-this-month')
+  getBirthdaysThisMonth(@User() user: { id: number }) {
+    return this.usersService.getBirthdaysThisMonth(user.id)
+  }
+
   @Get(':id')
   findOne(@Param('id') userId: string) {
     return this.usersService.findOne(+userId)

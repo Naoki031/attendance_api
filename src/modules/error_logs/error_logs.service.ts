@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, LessThan, In } from 'typeorm'
+import { createHash } from 'crypto'
 import { ErrorLog } from './entities/error_log.entity'
 import type { ErrorLogLevel } from './entities/error_log.entity'
 import { QueryErrorLogDto } from './dto/query-error_log.dto'
@@ -8,6 +9,7 @@ import moment from 'moment'
 
 export interface ErrorLogStats {
   total: number
+  totalOccurrences: number
   unresolved: number
   resolved: number
   errorCount: number
@@ -96,12 +98,14 @@ export class ErrorLogsService {
 
   /**
    * Returns aggregate statistics for error logs.
+   * total = unique error signatures; totalOccurrences = sum of all occurrences across duplicates.
    */
   async getStats(): Promise<ErrorLogStats> {
     const result = await this.errorLogRepository
       .createQueryBuilder('log')
       .select([
         'COUNT(*) AS total',
+        'SUM(log.occurrence_count) AS totalOccurrences',
         'SUM(CASE WHEN log.is_resolved = false THEN 1 ELSE 0 END) AS unresolved',
         'SUM(CASE WHEN log.is_resolved = true THEN 1 ELSE 0 END) AS resolved',
         "SUM(CASE WHEN log.level = 'error' THEN 1 ELSE 0 END) AS errorCount",
@@ -112,6 +116,7 @@ export class ErrorLogsService {
 
     return {
       total: Number(result?.total ?? 0),
+      totalOccurrences: Number(result?.totalOccurrences ?? 0),
       unresolved: Number(result?.unresolved ?? 0),
       resolved: Number(result?.resolved ?? 0),
       errorCount: Number(result?.errorCount ?? 0),
@@ -159,6 +164,7 @@ export class ErrorLogsService {
   /**
    * Persists an error log entry (fire-and-forget). Used by non-HTTP contexts
    * like WebSocket gateways that are not caught by AllExceptionsFilter.
+   * Uses INSERT ... ON DUPLICATE KEY UPDATE to deduplicate identical errors.
    */
   logError(data: {
     level?: ErrorLogLevel
@@ -168,16 +174,33 @@ export class ErrorLogsService {
     userId?: number | null
   }): void {
     const MAX = 500
+    const truncatedMessage = data.message.substring(0, MAX)
+    const raw = `${truncatedMessage}|ws|${data.path ?? ''}|0`
+    const fingerprint = createHash('sha256').update(raw).digest('hex')
+
+    const sql = `
+      INSERT INTO error_logs
+        (fingerprint, level, message, stack_trace, path, user_id,
+         is_resolved, occurrence_count, last_occurred_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 1, NOW())
+      ON DUPLICATE KEY UPDATE
+        occurrence_count = occurrence_count + 1,
+        last_occurred_at = NOW(),
+        is_resolved = 0,
+        resolved_by = NULL,
+        resolved_at = NULL
+    `
+
     this.errorLogRepository
-      .insert({
-        level: data.level ?? 'error',
-        message: data.message.substring(0, MAX),
-        stack_trace: data.stackTrace ?? null,
-        path: data.path?.substring(0, 500) ?? null,
-        user_id: data.userId ?? null,
-        is_resolved: false,
-      })
-      .catch((databaseError) => {
+      .query(sql, [
+        fingerprint,
+        data.level ?? 'error',
+        truncatedMessage,
+        data.stackTrace ?? null,
+        data.path?.substring(0, 500) ?? null,
+        data.userId ?? null,
+      ])
+      .catch((databaseError: unknown) => {
         this.logger.error(
           'Failed to save error log',
           databaseError instanceof Error ? databaseError.message : String(databaseError),

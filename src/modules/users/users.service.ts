@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as bcrypt from 'bcrypt'
+import moment from 'moment-timezone'
 import { User } from './entities/user.entity'
 import { CreateUserDto } from './dto/create-user.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
@@ -100,6 +101,48 @@ export class UsersService {
         message: 'Failed to find all users',
         stackTrace: (error as Error).stack ?? null,
         path: 'users',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Returns activated users in the same company/companies as the requesting user
+   * whose birth month matches the current month, ordered by day of birth ascending.
+   */
+  async getBirthdaysThisMonth(currentUserId: number): Promise<User[]> {
+    try {
+      const month = moment.utc().month() + 1
+      return await this.userRepository
+        .createQueryBuilder('user')
+        .where('user.is_activated = :activated', { activated: true })
+        .andWhere('user.date_of_birth IS NOT NULL')
+        .andWhere('MONTH(user.date_of_birth) = :month', { month })
+        .andWhere(
+          `user.id IN (
+            SELECT ud.user_id FROM user_departments ud
+            WHERE ud.company_id IN (
+              SELECT ud2.company_id FROM user_departments ud2
+              WHERE ud2.user_id = :currentUserId
+            )
+          )`,
+          { currentUserId },
+        )
+        .select([
+          'user.id',
+          'user.first_name',
+          'user.last_name',
+          'user.avatar',
+          'user.date_of_birth',
+        ])
+        .orderBy('DAY(user.date_of_birth)', 'ASC')
+        .getMany()
+    } catch (error) {
+      this.logger.error('Failed to fetch birthdays this month', error)
+      this.errorLogsService.logError({
+        message: 'Failed to fetch birthdays this month',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'users/birthdays-this-month',
       })
       throw error
     }

@@ -42,6 +42,7 @@ import { RoomSectionItem } from '@/modules/room-sections/entities/room-section-i
 import { ErrorLog } from '@/modules/error_logs/entities/error_log.entity'
 import { EmailTemplate } from '@/modules/email_templates/entities/email_template.entity'
 import { UserContract } from '@/modules/user_contracts/entities/user_contract.entity'
+import { Notification } from '@/modules/notifications/entities/notification.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -90,6 +91,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         ErrorLog,
         EmailTemplate,
         UserContract,
+        Notification,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

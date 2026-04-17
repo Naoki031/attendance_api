@@ -49,9 +49,12 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return
       }
 
-      const roomName = `company:${userDepartment.company_id}`
-      await client.join(roomName)
+      const companyRoom = `company:${userDepartment.company_id}`
+      const userRoom = `user:${payload.id}`
+      await client.join(companyRoom)
+      await client.join(userRoom)
       client.data.companyId = userDepartment.company_id
+      client.data.userId = payload.id
     } catch {
       client.disconnect()
     }

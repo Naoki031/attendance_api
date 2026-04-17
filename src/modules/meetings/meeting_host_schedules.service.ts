@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import moment from 'moment'
+import moment from 'moment-timezone'
 import { MeetingHostSchedule, HostScheduleType } from './entities/meeting_host_schedule.entity'
 import { Meeting } from './entities/meeting.entity'
 import { MeetingParticipant, MeetingParticipantRole } from './entities/meeting_participant.entity'
@@ -248,7 +248,7 @@ export class MeetingHostSchedulesService {
     isPrivileged = false,
   ): Promise<void> {
     try {
-      this.assertDateNotPast(date)
+      await this.assertDateNotPast(date, meetingUuid)
       const meeting = await this.findMeetingByUuid(meetingUuid)
       await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
@@ -299,7 +299,7 @@ export class MeetingHostSchedulesService {
     isPrivileged = false,
   ): Promise<void> {
     try {
-      this.assertDateNotPast(date)
+      await this.assertDateNotPast(date, meetingUuid)
       const meeting = await this.findMeetingByUuid(meetingUuid)
       await this.assertCanManage(meeting, requestUserId, isPrivileged)
 
@@ -593,12 +593,28 @@ export class MeetingHostSchedulesService {
     }
   }
 
-  /** Throws BadRequestException if the given date is strictly in the past (before today). */
-  private assertDateNotPast(date: string): void {
-    const today = moment().format('YYYY-MM-DD')
+  /** Throws BadRequestException if the given date is strictly in the past (before today in the meeting's company timezone). */
+  private async assertDateNotPast(date: string, meetingUuid: string): Promise<void> {
+    const timezone = await this.getMeetingTimezone(meetingUuid)
+    const today = moment.tz(timezone).format('YYYY-MM-DD')
     if (date < today) {
       throw new BadRequestException(`Cannot modify a past date: ${date}`)
     }
+  }
+
+  /** Returns the IANA timezone for the meeting's company, falling back to Asia/Ho_Chi_Minh. */
+  private async getMeetingTimezone(meetingUuid: string): Promise<string> {
+    const rows = (await this.meetingRepository.query(
+      `SELECT c.timezone
+       FROM meetings m
+       JOIN meeting_companies mc ON mc.meeting_id = m.id
+       JOIN companies co ON co.id = mc.company_id
+       JOIN countries c ON c.id = co.country_id
+       WHERE m.uuid = ? AND c.timezone IS NOT NULL
+       LIMIT 1`,
+      [meetingUuid],
+    )) as Array<{ timezone: string }>
+    return rows[0]?.timezone ?? 'Asia/Ho_Chi_Minh'
   }
 
   /**
