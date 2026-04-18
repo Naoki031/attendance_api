@@ -42,6 +42,10 @@ import { ErrorLog } from '../../modules/error_logs/entities/error_log.entity'
 import { EmailTemplate } from '../../modules/email_templates/entities/email_template.entity'
 import { UserContract } from '../../modules/user_contracts/entities/user_contract.entity'
 import { Notification } from '../../modules/notifications/entities/notification.entity'
+import { MemoryAlbum } from '../../modules/memories/entities/memory_album.entity'
+import { MemoryPhoto } from '../../modules/memories/entities/memory_photo.entity'
+import { MemoryReaction } from '../../modules/memories/entities/memory_reaction.entity'
+import { MemoryComment } from '../../modules/memories/entities/memory_comment.entity'
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
@@ -89,6 +93,10 @@ const options: DataSourceOptions & SeederOptions = {
     EmailTemplate,
     UserContract,
     Notification,
+    MemoryAlbum,
+    MemoryPhoto,
+    MemoryReaction,
+    MemoryComment,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',

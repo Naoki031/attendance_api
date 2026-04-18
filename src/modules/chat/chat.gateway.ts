@@ -116,6 +116,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .emit('message_translations_ready', { id: messageId, translations })
   }
 
+  broadcastMessage(roomId: number, payload: object): void {
+    this.server.to(`room_${roomId}`).emit('message_new', payload)
+  }
+
   handleDisconnect(client: Socket) {
     for (const [roomId, users] of this.roomUsers.entries()) {
       if (!users.has(client.id)) continue
@@ -338,34 +342,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Send mention notifications
       this.notifyMention(room, roomId, user, content.trim(), payload.mentionedUserIds, result)
 
-      // Translate in background — no await
-      this.chatService
-        .translateMessage({
-          messageId: result.id,
-          content: result.content,
-          detectedLang: result.detectedLang,
-          roomId,
-          onChunk: (lang, chunk) => {
-            this.server
-              .to(`room_${roomId}`)
-              .emit('message_translation_stream', { id: result.id, lang, chunk })
-          },
-        })
-        .then((translations) => {
-          if (Object.keys(translations).length > 0) {
-            this.server
-              .to(`room_${roomId}`)
-              .emit('message_translations_ready', { id: result.id, translations })
-          }
-        })
-        .catch((error) => {
-          this.logger.error('Background translation failed', error)
-          this.errorLogsService.logError({
-            message: 'Background translation failed',
-            stackTrace: (error as Error).stack ?? null,
-            path: 'chat',
-          })
-        })
+      // Translate in background — spam/emoji/unknown are filtered inside dispatchTranslation
+      this.dispatchTranslation({
+        messageId: result.id,
+        content: result.content,
+        detectedLang: result.detectedLang,
+        roomId,
+      })
     } catch (error) {
       this.logger.error('Failed to send message', error)
       this.errorLogsService.logError({
@@ -429,34 +412,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(`room_${roomId}`).emit('message_edited', result)
 
       // Translate in background — forceRefresh:true ensures stale cache is never used after edit
-      this.chatService
-        .translateMessage({
-          messageId: result.id,
-          content: result.content,
-          detectedLang: result.detectedLang,
-          roomId,
-          forceRefresh: true,
-          onChunk: (lang, chunk) => {
-            this.server
-              .to(`room_${roomId}`)
-              .emit('message_translation_stream', { id: result.id, lang, chunk })
-          },
-        })
-        .then((translations) => {
-          if (Object.keys(translations).length > 0) {
-            this.server
-              .to(`room_${roomId}`)
-              .emit('message_translations_ready', { id: result.id, translations })
-          }
-        })
-        .catch((error) => {
-          this.logger.error('Background translation failed', error)
-          this.errorLogsService.logError({
-            message: 'Background translation failed',
-            stackTrace: (error as Error).stack ?? null,
-            path: 'chat',
-          })
-        })
+      this.dispatchTranslation({
+        messageId: result.id,
+        content: result.content,
+        detectedLang: result.detectedLang,
+        roomId,
+        forceRefresh: true,
+      })
     } catch (error) {
       this.logger.error('Failed to edit message', error)
       this.errorLogsService.logError({
@@ -583,33 +545,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         result,
       )
 
-      this.chatService
-        .translateMessage({
-          messageId: result.id,
-          content: result.content,
-          detectedLang: result.detectedLang,
-          roomId,
-          onChunk: (lang, chunk) => {
-            this.server
-              .to(`room_${roomId}`)
-              .emit('message_translation_stream', { id: result.id, lang, chunk })
-          },
-        })
-        .then((translations) => {
-          if (Object.keys(translations).length > 0) {
-            this.server
-              .to(`room_${roomId}`)
-              .emit('message_translations_ready', { id: result.id, translations })
-          }
-        })
-        .catch((error) => {
-          this.logger.error('Background translation failed', error)
-          this.errorLogsService.logError({
-            message: 'Background translation failed',
-            stackTrace: (error as Error).stack ?? null,
-            path: 'chat',
-          })
-        })
+      this.dispatchTranslation({
+        messageId: result.id,
+        content: result.content,
+        detectedLang: result.detectedLang,
+        roomId,
+      })
     } catch (error) {
       this.logger.error('Failed to send thread reply', error)
       this.errorLogsService.logError({
@@ -764,6 +705,55 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * Returns user IDs currently connected to a room.
    */
+  /**
+   * Translates a message in the background and broadcasts the result to the room.
+   * Guards against spam and non-translatable content before spawning the AI call.
+   */
+  private dispatchTranslation(parameters: {
+    messageId: number
+    content: string
+    detectedLang: string
+    roomId: number
+    forceRefresh?: boolean
+  }): void {
+    // Skip translation for spam, emoji-only, unknown language, or short messages
+    if (
+      parameters.detectedLang === 'unknown' ||
+      !this.chatService.isTranslatableForDispatch(parameters.content)
+    ) {
+      return
+    }
+
+    this.chatService
+      .translateMessage({
+        messageId: parameters.messageId,
+        content: parameters.content,
+        detectedLang: parameters.detectedLang,
+        roomId: parameters.roomId,
+        forceRefresh: parameters.forceRefresh,
+        onChunk: (lang, chunk) => {
+          this.server
+            .to(`room_${parameters.roomId}`)
+            .emit('message_translation_stream', { id: parameters.messageId, lang, chunk })
+        },
+      })
+      .then((translations) => {
+        if (Object.keys(translations).length > 0) {
+          this.server
+            .to(`room_${parameters.roomId}`)
+            .emit('message_translations_ready', { id: parameters.messageId, translations })
+        }
+      })
+      .catch((error) => {
+        this.logger.error('Background translation failed', error)
+        this.errorLogsService.logError({
+          message: 'Background translation failed',
+          stackTrace: (error as Error).stack ?? null,
+          path: 'chat',
+        })
+      })
+  }
+
   private getOnlineUserIdsInRoom(roomId: number): Set<number> {
     const users = this.roomUsers.get(roomId)
     if (!users) return new Set()

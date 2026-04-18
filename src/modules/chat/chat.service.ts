@@ -194,6 +194,14 @@ export class ChatService {
     }
   }
 
+  /**
+   * Returns true when the message content is worth translating.
+   * Used by the gateway to skip AI calls for spam, emoji-only, and short content.
+   */
+  isTranslatableForDispatch(content: string): boolean {
+    return this.translateService.isTranslatableContent(content)
+  }
+
   async deleteMessage(parameters: { messageId: number; userId: number }): Promise<void> {
     try {
       const message = await this.messagesService.findOne(parameters.messageId)

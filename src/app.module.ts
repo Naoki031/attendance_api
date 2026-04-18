@@ -37,6 +37,7 @@ import { ErrorLogsModule } from './modules/error_logs/error_logs.module'
 import { EmailTemplatesModule } from './modules/email_templates/email_templates.module'
 import { UserContractsModule } from './modules/user_contracts/user_contracts.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
+import { MemoriesModule } from './modules/memories/memories.module'
 import { JwtStrategy } from '@/modules/auth/strategy/jwt.strategy'
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { JwtGuard } from '@/modules/auth/guards/jwt.guard'
@@ -82,6 +83,7 @@ import { LastSeenInterceptor } from '@/modules/users/interceptors/last-seen.inte
     EmailTemplatesModule,
     UserContractsModule,
     NotificationsModule,
+    MemoriesModule,
   ],
   providers: [
     {

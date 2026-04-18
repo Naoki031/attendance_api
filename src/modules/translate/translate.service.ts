@@ -394,7 +394,31 @@ export class TranslateService {
     this.client = new Anthropic({ apiKey })
   }
 
+  /**
+   * Fast local language detection using character pattern matching.
+   * Covers the three supported languages (vi, en, ja) with high confidence.
+   * Returns null when the text is ambiguous and AI detection is needed.
+   */
+  detectLanguageLocally(text: string): string | null {
+    const sample = text.slice(0, 500)
+
+    // Japanese: presence of hiragana or katakana is unambiguous
+    if (/[\u3040-\u309F\u30A0-\u30FF]/.test(sample)) return 'ja'
+
+    // Vietnamese: characters unique to Vietnamese orthography
+    if (/[đĐ]|[àáâãèéêìíòóôõùúýăắặổọụ]/i.test(sample) && /[ắặổộụ]/i.test(sample)) return 'vi'
+
+    // Pure ASCII (letters, numbers, common punctuation) → English
+    if (/^[\x20-\x7E\n\r\t]+$/.test(sample) && /[a-zA-Z]/.test(sample)) return 'en'
+
+    return null
+  }
+
   async detectLanguage(text: string): Promise<string> {
+    // Try fast local detection first — avoids an AI API call for obvious cases
+    const localResult = this.detectLanguageLocally(text)
+    if (localResult) return localResult
+
     if (!this.client) {
       this.logger.warn('Anthropic client not initialized, defaulting to "en"')
 
