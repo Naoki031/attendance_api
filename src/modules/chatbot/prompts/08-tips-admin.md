@@ -20,6 +20,15 @@ order: 80
 - In **Attendance Logs**, click the **camera icon** on any face check-in entry to view the captured photo and confidence score — useful for verifying disputed attendance records
 - To reset an employee's face registration (so they can re-submit), click the **Cancel KYC** button on their row in **Management → Users**
 - Chat emoji reactions are **exclusive per user per message** — each user can only have one reaction; picking a new emoji automatically replaces the previous one
+- Use **Sections** in the Chat room list to organize rooms by team or project — click **"Manage Sections"** at the top, then move rooms via ⋮ → **"Move to section"**. Sections collapse/expand on click
+- In Chat, use the **formatting toolbar** (toggle with the toolbar button) to compose messages with Bold, Italic, Underline, Strikethrough, Inline Code, Code Block, Blockquote, Bullet List, and Ordered List
+- Type **@name** in Chat to mention a member and send them a highlighted notification; use arrow keys or click to pick from the autocomplete dropdown
+- As a room admin, you can **kick** members from the room via the **member sidebar** (click the members icon, top-right of the room)
 - In **Meetings**, use the **host schedule** feature to rotate hosts automatically — useful for daily standups where different team members take turns leading
 - Admins can **edit and delete** any user's meeting (not just their own) — useful when a meeting creator leaves the company
 - As a meeting host, you can **pre-assign co-hosts from the meeting list** (without entering the room): click the ⋮ menu on a meeting card → **"Manage Co-Hosts"**. You can also promote/demote from inside the room via the control bar. Co-hosts can **invite people**, **edit the meeting schedule/time only** (not title, description, privacy, or companies), **manage host schedules**, **configure auto-call settings**, and **end the meeting**, but cannot transfer host, manage other co-hosts, or add/remove scheduled participants
+- Use **Sections** in the meeting list to organize rooms by project or team — click **"Manage Sections"** at the top of the meeting list page to create/rename/delete sections, then assign meetings via ⋮ → **"Move to section"**
+- Use **Scheduled Participants** (⋮ → "Manage Scheduled Participants") to pre-invite specific users for recurring meetings. Enable **Auto-call** to have the system ring them automatically before the meeting starts — configure minutes before, retry count, retry interval, and skip-weekends option
+- Inside a meeting room, the **Chat** panel (control bar chat button) supports full threaded messaging, message pinning, and auto-translate — useful for sharing links and notes without disrupting the audio
+
+- To share a **Memories album** to a team chat room, open the album and click **"Share album"** in the hero section — choose the room and add an optional message. The album appears as a clickable card in chat showing the cover photo, title, photo count, and event type
