@@ -47,6 +47,7 @@ import { MemoryAlbum } from '@/modules/memories/entities/memory_album.entity'
 import { MemoryPhoto } from '@/modules/memories/entities/memory_photo.entity'
 import { MemoryReaction } from '@/modules/memories/entities/memory_reaction.entity'
 import { MemoryComment } from '@/modules/memories/entities/memory_comment.entity'
+import { MemoryAlbumComment } from '@/modules/memories/entities/memory_album_comment.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -100,6 +101,7 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         MemoryPhoto,
         MemoryReaction,
         MemoryComment,
+        MemoryAlbumComment,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

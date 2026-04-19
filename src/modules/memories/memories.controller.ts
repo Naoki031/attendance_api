@@ -101,7 +101,7 @@ export class MemoriesController {
   @Get('albums/:id/download')
   @Public()
   async downloadAlbum(
-    @Param('id') id: string,
+    @Param('id') _id: string,
     @Query('token') token: string,
     @Res({ passthrough: true }) response: Response,
   ) {
@@ -241,6 +241,49 @@ export class MemoriesController {
   @Permissions('all_privileges', 'create')
   async shareToChat(@CurrentUser() user: { id: number }, @Body(ValidationPipe) dto: SharePhotoDto) {
     const data = await this.memoriesService.shareToChat(user.id, dto)
+    return { success: true, data }
+  }
+
+  @Get('albums/:id/album-comments')
+  @Permissions('all_privileges', 'read')
+  async getAlbumComments(@Param('id') id: string, @CurrentUser() user: { id: number }) {
+    const data = await this.memoriesService.getAlbumComments(id, user.id)
+    return { success: true, data }
+  }
+
+  @Post('albums/:id/album-comments')
+  @Permissions('all_privileges', 'create')
+  async addAlbumComment(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: number },
+    @Body(ValidationPipe) dto: CreateCommentDto,
+  ) {
+    const data = await this.memoriesService.addAlbumComment(id, user.id, dto.text)
+    return { success: true, data }
+  }
+
+  @Patch('album-comments/:id')
+  @Permissions('all_privileges', 'update')
+  async updateAlbumComment(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: number },
+    @Body(ValidationPipe) dto: UpdateCommentDto,
+  ) {
+    const data = await this.memoriesService.updateAlbumComment(id, user.id, dto.text)
+    return { success: true, data }
+  }
+
+  @Delete('album-comments/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'delete')
+  async deleteAlbumComment(@Param('id') id: string, @CurrentUser() user: { id: number }) {
+    await this.memoriesService.deleteAlbumComment(id, user.id)
+  }
+
+  @Post('album-comments/:id/translate')
+  @Permissions('all_privileges', 'read')
+  async translateAlbumComment(@Param('id') id: string, @CurrentUser() user: { id: number }) {
+    const data = await this.memoriesService.translateAlbumComment(id, user.id)
     return { success: true, data }
   }
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common'
+import moment from 'moment'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as fs from 'fs'
@@ -10,6 +11,7 @@ import { MemoryAlbum, Privacy } from './entities/memory_album.entity'
 import { MemoryPhoto } from './entities/memory_photo.entity'
 import { MemoryReaction, ReactionType } from './entities/memory_reaction.entity'
 import { MemoryComment } from './entities/memory_comment.entity'
+import { MemoryAlbumComment } from './entities/memory_album_comment.entity'
 import type { CreateAlbumDto } from './dto/create-album.dto'
 import type { UpdateAlbumDto } from './dto/update-album.dto'
 import type { CreateCommentDto } from './dto/create-comment.dto'
@@ -22,6 +24,9 @@ import { ChatService } from '@/modules/chat/chat.service'
 import { ChatRoomService } from '@/modules/chat/chat-room.service'
 import { ChatGateway } from '@/modules/chat/chat.gateway'
 import { UsersService } from '@/modules/users/users.service'
+import { NotificationsService } from '@/modules/notifications/notifications.service'
+import { EventsGateway } from '@/modules/events/events.gateway'
+import { MemoriesGateway } from './memories.gateway'
 
 export interface PaginatedResult<T> {
   items: T[]
@@ -45,8 +50,8 @@ export interface CommentWithUser {
   text: string
   reactions: Record<string, CommentReactionEntry[]>
   detectedLanguage: string | null
-  createdAt: Date
-  updatedAt: Date
+  createdAt: string
+  updatedAt: string
   user: { id: number; name: string; avatar: string | null }
 }
 
@@ -70,12 +75,17 @@ export class MemoriesService {
     private readonly reactionRepository: Repository<MemoryReaction>,
     @InjectRepository(MemoryComment)
     private readonly commentRepository: Repository<MemoryComment>,
+    @InjectRepository(MemoryAlbumComment)
+    private readonly albumCommentRepository: Repository<MemoryAlbumComment>,
     private readonly errorLogsService: ErrorLogsService,
     private readonly translateService: TranslateService,
     private readonly chatService: ChatService,
     private readonly chatRoomService: ChatRoomService,
     private readonly chatGateway: ChatGateway,
     private readonly usersService: UsersService,
+    private readonly memoriesGateway: MemoriesGateway,
+    private readonly notificationsService: NotificationsService,
+    private readonly eventsGateway: EventsGateway,
   ) {}
 
   // ─── ALBUM ────────────────────────────────────────────────────────────────
@@ -246,7 +256,7 @@ export class MemoriesService {
         height: row.height ?? 0,
         size: row.size,
         mimeType: row.mime_type,
-        createdAt: row.created_at,
+        createdAt: moment.utc(row.created_at).toISOString(),
       }))
 
       return {
@@ -859,8 +869,8 @@ export class MemoriesService {
         text: row.text,
         reactions: this.normalizeCommentReactions(row.reactions, nameMap),
         detectedLanguage: row.detected_language ?? null,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
+        createdAt: moment.utc(row.created_at).toISOString(),
+        updatedAt: moment.utc(row.updated_at).toISOString(),
         user: {
           id: row.user_id,
           name: `${row.first_name} ${row.last_name}`.trim(),
@@ -903,16 +913,57 @@ export class MemoriesService {
           })
       }
 
-      return {
+      const [userRow] = await this.commentRepository.manager.query<
+        Array<{ first_name: string; last_name: string; avatar: string | null }>
+      >(`SELECT first_name, last_name, avatar FROM users WHERE id = ? LIMIT 1`, [userId])
+
+      const fullName = userRow ? `${userRow.first_name} ${userRow.last_name}`.trim() : ''
+      const initials = fullName
+        ? fullName
+            .split(' ')
+            .filter(Boolean)
+            .map((part: string) => part[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 2)
+        : '?'
+
+      const commentData = {
         id: saved.id,
         photoId: saved.photoId,
         userId: String(saved.userId),
         text: saved.text,
+        reactions: {},
         detectedLanguage: null,
-        createdAt: saved.createdAt,
-        updatedAt: saved.updatedAt,
-        user: null,
+        createdAt: moment.utc(saved.createdAt).toISOString(),
+        updatedAt: moment.utc(saved.updatedAt).toISOString(),
+        user: userRow ? { name: fullName, avatar: userRow.avatar ?? undefined, initials } : null,
       }
+
+      this.memoriesGateway.broadcastPhotoCommentNew(photo.albumId, photoId, commentData)
+
+      // Notify all album members except the commenter (fire-and-forget)
+      Promise.all([
+        this.getAlbumMemberIds(photo.albumId),
+        this.albumRepository.manager.query<Array<{ title: string }>>(
+          `SELECT title FROM memory_albums WHERE id = ? LIMIT 1`,
+          [photo.albumId],
+        ),
+      ]).then(([memberIds, albumRows]) => {
+        const albumTitle = albumRows[0]?.title ?? ''
+        this.notifyMembers(userId, memberIds, {
+          type: 'memories_photo_comment',
+          title: albumTitle
+            ? `${fullName} commented on a photo in "${albumTitle}"`
+            : `${fullName} commented on a photo`,
+          body: dto.text.slice(0, 100),
+          icon: 'mdi-image-text',
+          iconColor: 'primary',
+          route: `/memories/${photo.albumId}?photoId=${photoId}`,
+        })
+      })
+
+      return commentData
     } catch (error) {
       this.logger.error(`Failed to add comment to photo ${photoId}`, error)
       this.errorLogsService.logError({
@@ -959,6 +1010,15 @@ export class MemoriesService {
       }
 
       const updated = await this.commentRepository.findOne({ where: { id: commentId } })
+      const photo = await this.photoRepository.findOne({ where: { id: comment.photoId } })
+      if (photo) {
+        this.memoriesGateway.broadcastPhotoCommentUpdated(
+          photo.albumId,
+          comment.photoId,
+          commentId,
+          dto.text,
+        )
+      }
       return { id: commentId, text: dto.text, updatedAt: updated!.updatedAt }
     } catch (error) {
       this.logger.error(`Failed to update comment ${commentId}`, error)
@@ -991,6 +1051,9 @@ export class MemoriesService {
       }
 
       await this.commentRepository.delete({ id: commentId })
+      if (album) {
+        this.memoriesGateway.broadcastPhotoCommentDeleted(album.id, comment.photoId, commentId)
+      }
     } catch (error) {
       this.logger.error(`Failed to remove comment ${commentId}`, error)
       this.errorLogsService.logError({
@@ -1325,6 +1388,52 @@ export class MemoriesService {
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────
 
+  /**
+   * Returns all user IDs who are members or creator of an album.
+   */
+  private async getAlbumMemberIds(albumId: string): Promise<number[]> {
+    const [albumRow] = await this.albumRepository.manager.query<Array<{ created_by_id: number }>>(
+      `SELECT created_by_id FROM memory_albums WHERE id = ? LIMIT 1`,
+      [albumId],
+    )
+    const memberRows = await this.albumRepository.manager.query<Array<{ user_id: number }>>(
+      `SELECT user_id FROM memory_album_members WHERE album_id = ?`,
+      [albumId],
+    )
+    const ids = new Set<number>(memberRows.map((row) => row.user_id))
+    if (albumRow) ids.add(albumRow.created_by_id)
+    return Array.from(ids)
+  }
+
+  /**
+   * Creates a DB notification and emits it via EventsGateway for each target member.
+   * Skips the actor (excludeUserId). Errors are silently ignored — notifications are non-critical.
+   */
+  private notifyMembers(
+    excludeUserId: number,
+    memberIds: number[],
+    payload: {
+      type: string
+      title: string
+      body: string
+      icon: string
+      iconColor: string
+      route: string
+    },
+  ): void {
+    const targets = memberIds.filter((id) => id !== excludeUserId)
+    for (const userId of targets) {
+      this.notificationsService
+        .create({ userId, ...payload })
+        .then((saved) => {
+          this.eventsGateway.server.to(`user:${userId}`).emit('notification:new', saved)
+        })
+        .catch(() => {
+          // non-critical — do not fail the main operation
+        })
+    }
+  }
+
   private async assertAlbumAccess(album: MemoryAlbum, userId: number): Promise<void> {
     if (album.privacy === Privacy.PUBLIC) return
     if (album.createdById === userId) return
@@ -1475,6 +1584,262 @@ export class MemoriesService {
       size: photo.size,
       mimeType: photo.mimeType,
       createdAt: photo.createdAt,
+    }
+  }
+
+  // ─── ALBUM COMMENTS ───────────────────────────────────────────────────────
+
+  /**
+   * Returns all comments for an album, ordered by creation time ascending.
+   */
+  async getAlbumComments(albumId: string, userId: number): Promise<object[]> {
+    try {
+      const album = await this.albumRepository.findOne({ where: { id: albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+      await this.assertAlbumAccess(album, userId)
+
+      const rows = await this.albumCommentRepository.manager.query<
+        Array<{
+          id: string
+          album_id: string
+          user_id: number
+          text: string
+          detected_language: string | null
+          created_at: string | Date
+          updated_at: string | Date
+          first_name: string
+          last_name: string
+          avatar: string | null
+        }>
+      >(
+        `SELECT
+          c.id, c.album_id, c.user_id, c.text, c.detected_language, c.created_at, c.updated_at,
+          u.first_name, u.last_name, u.avatar
+        FROM memory_album_comments c
+        INNER JOIN users u ON u.id = c.user_id
+        WHERE c.album_id = ?
+        ORDER BY c.created_at ASC`,
+        [albumId],
+      )
+
+      return rows.map((row) => ({
+        id: row.id,
+        albumId: row.album_id,
+        userId: String(row.user_id),
+        text: row.text,
+        detectedLanguage: row.detected_language ?? null,
+        createdAt: moment.utc(row.created_at).toISOString(),
+        updatedAt: moment.utc(row.updated_at).toISOString(),
+        user: {
+          id: row.user_id,
+          name: `${row.first_name} ${row.last_name}`.trim(),
+          avatar: row.avatar,
+        },
+      }))
+    } catch (error) {
+      this.logger.error(`Failed to get album comments for album ${albumId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to get album comments for album ${albumId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Adds a comment to an album.
+   */
+  async addAlbumComment(albumId: string, userId: number, text: string): Promise<object> {
+    try {
+      const album = await this.albumRepository.findOne({ where: { id: albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+      await this.assertAlbumAccess(album, userId)
+
+      const comment = this.albumCommentRepository.create({ albumId, userId, text })
+      const saved = await this.albumCommentRepository.save(comment)
+
+      // Detect language asynchronously — does not block the response
+      if (this.translateService.isTranslatableContent(text)) {
+        this.translateService
+          .detectLanguage(text)
+          .then((lang) => {
+            if (lang && lang !== 'unknown') {
+              return this.albumCommentRepository.update(saved.id, { detectedLanguage: lang })
+            }
+          })
+          .catch(() => {
+            // silently ignore — translate button just won't show
+          })
+      }
+
+      const [userRow] = await this.albumCommentRepository.manager.query<
+        Array<{ first_name: string; last_name: string; avatar: string | null }>
+      >(`SELECT first_name, last_name, avatar FROM users WHERE id = ? LIMIT 1`, [userId])
+
+      const albumCommentData = {
+        id: saved.id,
+        albumId: saved.albumId,
+        userId: String(saved.userId),
+        text: saved.text,
+        detectedLanguage: null,
+        createdAt: moment.utc(saved.createdAt).toISOString(),
+        updatedAt: moment.utc(saved.updatedAt).toISOString(),
+        user: userRow
+          ? {
+              id: userId,
+              name: `${userRow.first_name} ${userRow.last_name}`.trim(),
+              avatar: userRow.avatar,
+            }
+          : null,
+      }
+
+      this.memoriesGateway.broadcastAlbumCommentNew(albumId, albumCommentData)
+
+      // Notify all album members except the commenter (fire-and-forget)
+      const fullName = userRow ? `${userRow.first_name} ${userRow.last_name}`.trim() : ''
+      const albumTitle = album.title ?? ''
+      this.getAlbumMemberIds(albumId).then((memberIds) => {
+        this.notifyMembers(userId, memberIds, {
+          type: 'memories_album_comment',
+          title: albumTitle
+            ? `${fullName} commented on "${albumTitle}"`
+            : `${fullName} commented on the album`,
+          body: text.slice(0, 100),
+          icon: 'mdi-image-album',
+          iconColor: 'primary',
+          route: `/memories/${albumId}?openNotes=1&commentId=${saved.id}`,
+        })
+      })
+
+      return albumCommentData
+    } catch (error) {
+      this.logger.error(`Failed to add comment to album ${albumId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to add comment to album ${albumId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Updates an album comment. Only the comment owner can edit.
+   */
+  async updateAlbumComment(
+    commentId: string,
+    userId: number,
+    text: string,
+  ): Promise<{ id: string; text: string; updatedAt: string }> {
+    try {
+      const comment = await this.albumCommentRepository.findOne({ where: { id: commentId } })
+      if (!comment) throw new NotFoundException('Album comment not found')
+      if (comment.userId !== userId)
+        throw new ForbiddenException("Cannot edit another user's comment")
+
+      // Reset translations since text changed
+      await this.albumCommentRepository.update(commentId, { text, detectedLanguage: null })
+      const updated = await this.albumCommentRepository.findOne({ where: { id: commentId } })
+
+      // Re-detect language asynchronously
+      if (this.translateService.isTranslatableContent(text)) {
+        this.translateService
+          .detectLanguage(text)
+          .then((lang) => {
+            if (lang && lang !== 'unknown') {
+              return this.albumCommentRepository.update(commentId, { detectedLanguage: lang })
+            }
+          })
+          .catch(() => {})
+      }
+
+      this.memoriesGateway.broadcastAlbumCommentUpdated(comment.albumId, commentId, text)
+
+      return {
+        id: commentId,
+        text,
+        updatedAt: moment.utc(updated?.updatedAt ?? moment.utc().toDate()).toISOString(),
+      }
+    } catch (error) {
+      this.logger.error(`Failed to update album comment ${commentId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to update album comment ${commentId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Deletes an album comment. Only the comment owner can delete.
+   */
+  async deleteAlbumComment(commentId: string, userId: number): Promise<void> {
+    try {
+      const comment = await this.albumCommentRepository.findOne({ where: { id: commentId } })
+      if (!comment) throw new NotFoundException('Album comment not found')
+      if (comment.userId !== userId)
+        throw new ForbiddenException("Cannot delete another user's comment")
+
+      await this.albumCommentRepository.delete(commentId)
+      this.memoriesGateway.broadcastAlbumCommentDeleted(comment.albumId, commentId)
+    } catch (error) {
+      this.logger.error(`Failed to delete album comment ${commentId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to delete album comment ${commentId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Translates an album comment to all supported languages.
+   * Caches translations in DB to avoid repeated AI calls.
+   */
+  async translateAlbumComment(commentId: string, userId: number): Promise<Record<string, string>> {
+    try {
+      const comment = await this.albumCommentRepository.findOne({ where: { id: commentId } })
+      if (!comment) throw new NotFoundException('Album comment not found')
+
+      const album = await this.albumRepository.findOne({ where: { id: comment.albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+      await this.assertAlbumAccess(album, userId)
+
+      // Return cached translations from DB — avoids repeated AI calls
+      if (comment.translations && Object.keys(comment.translations).length > 0) {
+        return comment.translations
+      }
+
+      if (!this.translateService.isTranslatableContent(comment.text)) return {}
+
+      const detectedLang =
+        comment.detectedLanguage ?? (await this.translateService.detectLanguage(comment.text))
+      if (detectedLang === 'unknown') return {}
+
+      const targetLangs = ['en', 'vi', 'ja'].filter((lang) => lang !== detectedLang)
+      const translations = await this.translateService.translateToMultiple(
+        comment.text,
+        detectedLang,
+        targetLangs,
+      )
+
+      // Persist translations so subsequent requests skip AI entirely
+      if (Object.keys(translations).length > 0) {
+        await this.albumCommentRepository.update({ id: commentId }, { translations })
+      }
+
+      return translations
+    } catch (error) {
+      this.logger.error(`Failed to translate album comment ${commentId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to translate album comment ${commentId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
     }
   }
 }

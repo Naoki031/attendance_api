@@ -992,7 +992,9 @@ export class TranslateService {
   }
 
   private isOnlyEmoji(text: string): boolean {
-    const stripped = text.replace(/\s/g, '')
+    // Strip custom emoji tokens like :blob-happy: before checking
+    const withoutCustom = text.replace(/:[a-z0-9_-]+:/g, '')
+    const stripped = withoutCustom.replace(/\s/g, '')
     if (stripped.length === 0) return true
     const emojiRegex = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+$/u
 
