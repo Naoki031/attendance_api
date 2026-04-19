@@ -25,6 +25,7 @@ import { CreateCommentDto } from './dto/create-comment.dto'
 import { UpdateCommentDto } from './dto/update-comment.dto'
 import { ToggleReactionDto } from './dto/toggle-reaction.dto'
 import { SharePhotoDto } from './dto/share-photo.dto'
+import { ShareAlbumDto } from './dto/share-album.dto'
 import { QueryAlbumsDto } from './dto/query-albums.dto'
 import { UpdateMembersDto } from './dto/update-members.dto'
 import { memoriesMulterConfig } from './config/multer.config'
@@ -240,6 +241,16 @@ export class MemoriesController {
   @Permissions('all_privileges', 'create')
   async shareToChat(@CurrentUser() user: { id: number }, @Body(ValidationPipe) dto: SharePhotoDto) {
     const data = await this.memoriesService.shareToChat(user.id, dto)
+    return { success: true, data }
+  }
+
+  @Post('share-album')
+  @Permissions('all_privileges', 'create')
+  async shareAlbumToChat(
+    @CurrentUser() user: { id: number },
+    @Body(ValidationPipe) dto: ShareAlbumDto,
+  ) {
+    const data = await this.memoriesService.shareAlbumToChat(user.id, dto)
     return { success: true, data }
   }
 }

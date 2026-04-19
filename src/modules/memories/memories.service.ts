@@ -14,6 +14,7 @@ import type { CreateAlbumDto } from './dto/create-album.dto'
 import type { UpdateAlbumDto } from './dto/update-album.dto'
 import type { CreateCommentDto } from './dto/create-comment.dto'
 import type { SharePhotoDto } from './dto/share-photo.dto'
+import type { ShareAlbumDto } from './dto/share-album.dto'
 import type { QueryAlbumsDto } from './dto/query-albums.dto'
 import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 import { TranslateService } from '@/modules/translate/translate.service'
@@ -1147,6 +1148,71 @@ export class MemoriesService {
       this.logger.error('Failed to share photo', error)
       this.errorLogsService.logError({
         message: 'Failed to share photo',
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Shares an entire album to a chat room as a clickable album card message.
+   */
+  async shareAlbumToChat(userId: number, dto: ShareAlbumDto): Promise<object> {
+    try {
+      const album = await this.albumRepository.findOne({ where: { id: dto.albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+
+      await this.assertAlbumAccess(album, userId)
+
+      const room = await this.chatRoomService.findByUuid(dto.chatRoomId, userId)
+      const sender = await this.usersService.findOne(userId)
+
+      let coverUrl = ''
+      if (album.coverPhotoId) {
+        const coverPhoto = await this.photoRepository.findOne({ where: { id: album.coverPhotoId } })
+        if (coverPhoto) {
+          const raw = coverPhoto.thumbnailUrl ?? coverPhoto.url
+          coverUrl = raw.startsWith('/') ? raw : `/${raw}`
+        }
+      }
+
+      if (!coverUrl) {
+        const firstPhoto = await this.photoRepository.findOne({
+          where: { albumId: album.id },
+          order: { createdAt: 'ASC' },
+        })
+        if (firstPhoto) {
+          const raw = firstPhoto.thumbnailUrl ?? firstPhoto.url
+          coverUrl = raw.startsWith('/') ? raw : `/${raw}`
+        }
+      }
+
+      const parts: string[] = [
+        album.id,
+        coverUrl,
+        album.title,
+        String(album.photoCount),
+        album.eventType,
+        dto.message ?? '',
+      ]
+      const content = `[memories_album](${parts.join('|')})`
+
+      const broadcast = await this.chatService.sendMessage({
+        roomId: room.id,
+        userId,
+        username: sender.full_name,
+        avatar: sender.avatar ?? '',
+        content,
+      })
+
+      this.chatGateway.broadcastMessage(room.id, broadcast)
+
+      return broadcast
+    } catch (error) {
+      this.logger.error('Failed to share album', error)
+      this.errorLogsService.logError({
+        message: 'Failed to share album',
         stackTrace: (error as Error).stack ?? null,
         path: 'memories',
       })
