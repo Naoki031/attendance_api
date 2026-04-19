@@ -47,6 +47,8 @@ import { MemoryPhoto } from '../../modules/memories/entities/memory_photo.entity
 import { MemoryReaction } from '../../modules/memories/entities/memory_reaction.entity'
 import { MemoryComment } from '../../modules/memories/entities/memory_comment.entity'
 import { MemoryAlbumComment } from '../../modules/memories/entities/memory_album_comment.entity'
+import { MemoryAlbumView } from '../../modules/memories/entities/memory_album_view.entity'
+import { MemoryPhotoView } from '../../modules/memories/entities/memory_photo_view.entity'
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
@@ -99,6 +101,8 @@ const options: DataSourceOptions & SeederOptions = {
     MemoryReaction,
     MemoryComment,
     MemoryAlbumComment,
+    MemoryAlbumView,
+    MemoryPhotoView,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',

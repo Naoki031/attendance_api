@@ -9,6 +9,8 @@ import { MemoryPhoto } from './entities/memory_photo.entity'
 import { MemoryReaction } from './entities/memory_reaction.entity'
 import { MemoryComment } from './entities/memory_comment.entity'
 import { MemoryAlbumComment } from './entities/memory_album_comment.entity'
+import { MemoryAlbumView } from './entities/memory_album_view.entity'
+import { MemoryPhotoView } from './entities/memory_photo_view.entity'
 import { memoriesMulterConfig } from './config/multer.config'
 import { ErrorLogsModule } from '@/modules/error_logs/error_logs.module'
 import { UserGroupPermissionsModule } from '@/modules/user_group_permissions/user_group_permissions.module'
@@ -26,6 +28,8 @@ import { EventsModule } from '@/modules/events/events.module'
       MemoryReaction,
       MemoryComment,
       MemoryAlbumComment,
+      MemoryAlbumView,
+      MemoryPhotoView,
     ]),
     MulterModule.register(memoriesMulterConfig),
     ErrorLogsModule,

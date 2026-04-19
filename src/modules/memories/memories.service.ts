@@ -12,6 +12,8 @@ import { MemoryPhoto } from './entities/memory_photo.entity'
 import { MemoryReaction, ReactionType } from './entities/memory_reaction.entity'
 import { MemoryComment } from './entities/memory_comment.entity'
 import { MemoryAlbumComment } from './entities/memory_album_comment.entity'
+import { MemoryAlbumView } from './entities/memory_album_view.entity'
+import { MemoryPhotoView } from './entities/memory_photo_view.entity'
 import type { CreateAlbumDto } from './dto/create-album.dto'
 import type { UpdateAlbumDto } from './dto/update-album.dto'
 import type { CreateCommentDto } from './dto/create-comment.dto'
@@ -77,6 +79,10 @@ export class MemoriesService {
     private readonly commentRepository: Repository<MemoryComment>,
     @InjectRepository(MemoryAlbumComment)
     private readonly albumCommentRepository: Repository<MemoryAlbumComment>,
+    @InjectRepository(MemoryAlbumView)
+    private readonly albumViewRepository: Repository<MemoryAlbumView>,
+    @InjectRepository(MemoryPhotoView)
+    private readonly photoViewRepository: Repository<MemoryPhotoView>,
     private readonly errorLogsService: ErrorLogsService,
     private readonly translateService: TranslateService,
     private readonly chatService: ChatService,
@@ -184,6 +190,16 @@ export class MemoriesService {
 
       await this.assertAlbumAccess(album, userId)
 
+      // Record view (upsert) and fetch stats in parallel
+      await Promise.all([
+        this.albumViewRepository.manager.query(
+          `INSERT INTO memory_album_views (album_id, user_id)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+          [id, userId],
+        ),
+      ])
+
       return this.serializeAlbumAsync(album)
     } catch (error) {
       this.logger.error(`Failed to find album ${id}`, error)
@@ -230,13 +246,20 @@ export class MemoriesService {
           first_name: string | null
           last_name: string | null
           avatar: string | null
+          view_count: number
         }>
       >(
         `SELECT p.id, p.album_id, p.url, p.thumbnail_url, p.caption,
                 p.uploaded_by_id, p.width, p.height, p.size, p.mime_type, p.created_at,
-                u.first_name, u.last_name, u.avatar
+                u.first_name, u.last_name, u.avatar,
+                COALESCE(pv.view_count, 0) AS view_count
          FROM memory_photos p
          LEFT JOIN users u ON u.id = p.uploaded_by_id
+         LEFT JOIN (
+           SELECT photo_id, COUNT(*) AS view_count
+           FROM memory_photo_views
+           GROUP BY photo_id
+         ) pv ON pv.photo_id = p.id
          WHERE p.album_id = ?
          ORDER BY p.created_at DESC
          LIMIT ? OFFSET ?`,
@@ -256,6 +279,7 @@ export class MemoriesService {
         height: row.height ?? 0,
         size: row.size,
         mimeType: row.mime_type,
+        viewCount: Number(row.view_count),
         createdAt: moment.utc(row.created_at).toISOString(),
       }))
 
@@ -1533,6 +1557,8 @@ export class MemoriesService {
     coverPhotoUrl: string | null | undefined,
     members: { id: string; name: string; avatar: string | null }[],
     memberIds: string[],
+    viewCount?: number,
+    recentViewers?: { id: string; name: string; avatar: string | null }[],
   ): object {
     return {
       id: album.id,
@@ -1547,6 +1573,8 @@ export class MemoriesService {
       memberIds,
       members,
       photoCount: album.photoCount,
+      viewCount: viewCount ?? 0,
+      recentViewers: recentViewers ?? [],
       createdAt: album.createdAt,
       updatedAt: album.updatedAt,
     }
@@ -1556,13 +1584,110 @@ export class MemoriesService {
     album: MemoryAlbum,
     coverPhotoUrl?: string | null,
   ): Promise<object> {
-    const rows = await this.albumRepository.manager.query<Array<{ user_id: number }>>(
-      `SELECT user_id FROM memory_album_members WHERE album_id = ?`,
-      [album.id],
-    )
-    const memberIds = rows.map((row) => String(row.user_id))
+    const [memberRows, viewStats] = await Promise.all([
+      this.albumRepository.manager.query<Array<{ user_id: number }>>(
+        `SELECT user_id FROM memory_album_members WHERE album_id = ?`,
+        [album.id],
+      ),
+      this.getAlbumViewStats(album.id),
+    ])
+    const memberIds = memberRows.map((row) => String(row.user_id))
     const members = await this.fetchMembersInfo(memberIds)
-    return this.serializeAlbum(album, coverPhotoUrl, members, memberIds)
+    return this.serializeAlbum(
+      album,
+      coverPhotoUrl,
+      members,
+      memberIds,
+      viewStats.viewCount,
+      viewStats.recentViewers,
+    )
+  }
+
+  private async getAlbumViewStats(albumId: string): Promise<{
+    viewCount: number
+    recentViewers: { id: string; name: string; avatar: string | null }[]
+  }> {
+    const rows = await this.albumViewRepository.manager.query<
+      Array<{
+        user_id: number
+        first_name: string | null
+        last_name: string | null
+        avatar: string | null
+        viewed_at: Date
+      }>
+    >(
+      `SELECT v.user_id, u.first_name, u.last_name, u.avatar, v.updated_at AS viewed_at
+       FROM memory_album_views v
+       LEFT JOIN users u ON u.id = v.user_id
+       WHERE v.album_id = ?
+       ORDER BY v.updated_at DESC`,
+      [albumId],
+    )
+
+    const viewCount = rows.length
+    const recentViewers = rows.slice(0, 5).map((row) => ({
+      id: String(row.user_id),
+      name: row.first_name
+        ? `${row.first_name} ${row.last_name ?? ''}`.trim()
+        : String(row.user_id),
+      avatar: row.avatar ?? null,
+    }))
+
+    return { viewCount, recentViewers }
+  }
+
+  /**
+   * Returns the full list of users who viewed an album, ordered by most recent first.
+   */
+  async getAlbumViewers(
+    albumId: string,
+    userId: number,
+  ): Promise<{
+    viewCount: number
+    viewers: { id: string; name: string; avatar: string | null; viewedAt: string }[]
+  }> {
+    try {
+      const album = await this.albumRepository.findOne({ where: { id: albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+      await this.assertAlbumAccess(album, userId)
+
+      const rows = await this.albumViewRepository.manager.query<
+        Array<{
+          user_id: number
+          first_name: string | null
+          last_name: string | null
+          avatar: string | null
+          viewed_at: Date
+        }>
+      >(
+        `SELECT v.user_id, u.first_name, u.last_name, u.avatar, v.updated_at AS viewed_at
+         FROM memory_album_views v
+         LEFT JOIN users u ON u.id = v.user_id
+         WHERE v.album_id = ?
+         ORDER BY v.updated_at DESC`,
+        [albumId],
+      )
+
+      return {
+        viewCount: rows.length,
+        viewers: rows.map((row) => ({
+          id: String(row.user_id),
+          name: row.first_name
+            ? `${row.first_name} ${row.last_name ?? ''}`.trim()
+            : String(row.user_id),
+          avatar: row.avatar ?? null,
+          viewedAt: moment.utc(row.viewed_at).toISOString(),
+        })),
+      }
+    } catch (error) {
+      this.logger.error(`Failed to fetch viewers for album ${albumId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to fetch viewers for album ${albumId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
   }
 
   private serializePhoto(
@@ -1584,6 +1709,30 @@ export class MemoriesService {
       size: photo.size,
       mimeType: photo.mimeType,
       createdAt: photo.createdAt,
+    }
+  }
+
+  // ─── VIEWS ────────────────────────────────────────────────────────────────
+
+  /**
+   * Records that a user has viewed a photo (upsert — one row per user per photo).
+   */
+  async recordPhotoView(photoId: string, userId: number): Promise<void> {
+    try {
+      await this.photoViewRepository.manager.query(
+        `INSERT INTO memory_photo_views (photo_id, user_id)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+        [photoId, userId],
+      )
+    } catch (error) {
+      this.logger.error(`Failed to record photo view ${photoId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to record photo view ${photoId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
     }
   }
 

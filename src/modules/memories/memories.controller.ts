@@ -159,6 +159,20 @@ export class MemoriesController {
     return { success: true, data }
   }
 
+  @Get('albums/:id/viewers')
+  @Permissions('all_privileges', 'read')
+  async getAlbumViewers(@Param('id') id: string, @CurrentUser() user: { id: number }) {
+    const data = await this.memoriesService.getAlbumViewers(id, user.id)
+    return { success: true, data }
+  }
+
+  @Post('photos/:id/view')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions('all_privileges', 'create')
+  async recordPhotoView(@Param('id') id: string, @CurrentUser() user: { id: number }) {
+    await this.memoriesService.recordPhotoView(id, user.id)
+  }
+
   @Delete('photos/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('all_privileges', 'delete')
