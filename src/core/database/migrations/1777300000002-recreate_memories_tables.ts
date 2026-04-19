@@ -3,10 +3,13 @@ import { MigrationInterface, QueryRunner } from 'typeorm'
 export class RecreateMemoriesTables1777300000002 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Drop old tables (wrong schema from previous migration)
+    // Disable FK checks so tables can be dropped in any order regardless of existing constraints
+    await queryRunner.query(`SET FOREIGN_KEY_CHECKS = 0`)
     await queryRunner.query(`DROP TABLE IF EXISTS memory_comments`)
     await queryRunner.query(`DROP TABLE IF EXISTS memory_reactions`)
     await queryRunner.query(`DROP TABLE IF EXISTS memory_photos`)
     await queryRunner.query(`DROP TABLE IF EXISTS memory_albums`)
+    await queryRunner.query(`SET FOREIGN_KEY_CHECKS = 1`)
 
     // Create memory_albums (without cover_photo_id FK — circular dep resolved below)
     await queryRunner.query(`
@@ -61,7 +64,7 @@ export class RecreateMemoriesTables1777300000002 implements MigrationInterface {
       CREATE TABLE memory_reactions (
         id         VARCHAR(36) NOT NULL,
         photo_id   VARCHAR(36) NOT NULL,
-        user_id    INT UNSIGNED NOT NULL,
+        user_id    INT           NOT NULL,
         type       ENUM('heart','care','laugh','wow','angry','sad') NOT NULL,
         created_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
@@ -75,15 +78,19 @@ export class RecreateMemoriesTables1777300000002 implements MigrationInterface {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `)
 
-    // Create memory_comments
+    // Create memory_comments — includes detected_language, reactions, translations
+    // to cover cases where the earlier ALTER migrations were no-ops (fresh DB)
     await queryRunner.query(`
       CREATE TABLE memory_comments (
-        id         VARCHAR(36)  NOT NULL,
-        photo_id   VARCHAR(36)  NOT NULL,
-        user_id    INT UNSIGNED NOT NULL,
-        text       TEXT         NOT NULL,
-        created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        id                 VARCHAR(36)  NOT NULL,
+        photo_id           VARCHAR(36)  NOT NULL,
+        user_id            INT          NOT NULL,
+        text               TEXT         NOT NULL,
+        detected_language  VARCHAR(10)  NULL DEFAULT NULL,
+        reactions          JSON         NULL DEFAULT NULL,
+        translations       JSON         NULL DEFAULT NULL,
+        created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         CONSTRAINT FK_memory_comments_photo
           FOREIGN KEY (photo_id) REFERENCES memory_photos (id) ON DELETE CASCADE,
