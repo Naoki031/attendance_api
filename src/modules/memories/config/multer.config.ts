@@ -2,7 +2,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 import type { Request } from 'express'
-import { diskStorage } from 'multer'
+import { diskStorage, memoryStorage } from 'multer'
 
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
@@ -54,5 +54,20 @@ export const memoriesMulterConfig = {
     callback: (error: Error | null, acceptFile: boolean) => void,
   ) => {
     callback(null, ALLOWED_MIME_TYPES.has(file.mimetype))
+  },
+}
+
+export const chunkMulterConfig = {
+  storage: memoryStorage(),
+  limits: {
+    fileSize: 6 * 1024 * 1024,
+    files: 1,
+  },
+  fileFilter: (
+    _request: Request,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    callback(null, file.fieldname === 'chunk')
   },
 }

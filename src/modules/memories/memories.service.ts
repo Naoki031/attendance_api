@@ -1,10 +1,18 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common'
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common'
+import { Cron } from '@nestjs/schedule'
 import moment from 'moment'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
+import { spawn } from 'child_process'
 import * as archiver from 'archiver'
 import sharp from 'sharp'
 import { MemoryAlbum, Privacy } from './entities/memory_album.entity'
@@ -17,6 +25,7 @@ import { MemoryPhotoView } from './entities/memory_photo_view.entity'
 import type { CreateAlbumDto } from './dto/create-album.dto'
 import type { UpdateAlbumDto } from './dto/update-album.dto'
 import type { CreateCommentDto } from './dto/create-comment.dto'
+import type { UploadChunkDto, CompleteChunkUploadDto } from './dto/upload-chunk.dto'
 import type { SharePhotoDto } from './dto/share-photo.dto'
 import type { ShareAlbumDto } from './dto/share-album.dto'
 import type { QueryAlbumsDto } from './dto/query-albums.dto'
@@ -1754,6 +1763,7 @@ export class MemoriesService {
           user_id: number
           text: string
           detected_language: string | null
+          reactions: Record<string, Array<{ id: number; name: string }>> | null
           created_at: string | Date
           updated_at: string | Date
           first_name: string
@@ -1762,7 +1772,7 @@ export class MemoriesService {
         }>
       >(
         `SELECT
-          c.id, c.album_id, c.user_id, c.text, c.detected_language, c.created_at, c.updated_at,
+          c.id, c.album_id, c.user_id, c.text, c.detected_language, c.reactions, c.created_at, c.updated_at,
           u.first_name, u.last_name, u.avatar
         FROM memory_album_comments c
         INNER JOIN users u ON u.id = c.user_id
@@ -1771,12 +1781,18 @@ export class MemoriesService {
         [albumId],
       )
 
+      const nameMap = new Map<number, string>()
+      for (const row of rows) {
+        nameMap.set(row.user_id, `${row.first_name} ${row.last_name}`.trim())
+      }
+
       return rows.map((row) => ({
         id: row.id,
         albumId: row.album_id,
         userId: String(row.user_id),
         text: row.text,
         detectedLanguage: row.detected_language ?? null,
+        reactions: this.normalizeCommentReactions(row.reactions, nameMap),
         createdAt: moment.utc(row.created_at).toISOString(),
         updatedAt: moment.utc(row.updated_at).toISOString(),
         user: {
@@ -1944,6 +1960,57 @@ export class MemoriesService {
     }
   }
 
+  async toggleAlbumCommentReaction(
+    commentId: string,
+    userId: number,
+    type: string,
+  ): Promise<Record<string, CommentReactionEntry[]>> {
+    try {
+      const comment = await this.albumCommentRepository.findOne({ where: { id: commentId } })
+      if (!comment) throw new NotFoundException('Album comment not found')
+
+      const [userRow] = await this.albumCommentRepository.manager.query<
+        Array<{ first_name: string; last_name: string }>
+      >(`SELECT first_name, last_name FROM users WHERE id = ? LIMIT 1`, [userId])
+      const userName = userRow
+        ? `${userRow.first_name} ${userRow.last_name}`.trim()
+        : String(userId)
+
+      const reactions = this.normalizeCommentReactions(
+        comment.reactions,
+        new Map([[userId, userName]]),
+      )
+
+      const wasOnThisType = (reactions[type] ?? []).some((entry) => entry.id === userId)
+
+      for (const key of Object.keys(reactions)) {
+        reactions[key] = (reactions[key] ?? []).filter((entry) => entry.id !== userId)
+      }
+
+      if (!wasOnThisType) {
+        reactions[type] = [...(reactions[type] ?? []), { id: userId, name: userName }]
+      }
+
+      await this.albumCommentRepository.update({ id: commentId }, { reactions })
+
+      this.memoriesGateway.broadcastAlbumCommentReactionUpdated(
+        comment.albumId,
+        commentId,
+        reactions,
+      )
+
+      return reactions
+    } catch (error) {
+      this.logger.error(`Failed to toggle reaction on album comment ${commentId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to toggle reaction on album comment ${commentId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
   /**
    * Translates an album comment to all supported languages.
    * Caches translations in DB to avoid repeated AI calls.
@@ -1989,6 +2056,359 @@ export class MemoriesService {
         path: 'memories',
       })
       throw error
+    }
+  }
+
+  // ─── CHUNKED UPLOAD ───────────────────────────────────────────────────────
+
+  /**
+   * Receives a single chunk of a multi-part upload.
+   * Saves the chunk buffer to uploads/temp/{uploadId}/chunk_{chunkIndex}.
+   */
+  async uploadChunk(
+    albumId: string,
+    userId: number,
+    file: Express.Multer.File,
+    dto: UploadChunkDto,
+  ): Promise<{ received: number; uploadId: string }> {
+    try {
+      const album = await this.albumRepository.findOne({ where: { id: albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+
+      await this.assertAlbumAccess(album, userId)
+
+      const temporaryDirectory = path.join(process.cwd(), 'uploads', 'temp', dto.uploadId)
+      fs.mkdirSync(temporaryDirectory, { recursive: true })
+
+      const chunkPath = path.join(temporaryDirectory, `chunk_${dto.chunkIndex}`)
+
+      // Security: ensure the resolved path stays within the temp directory
+      const resolvedChunkPath = path.resolve(chunkPath)
+      const resolvedTemporaryDirectory = path.resolve(temporaryDirectory)
+      if (!resolvedChunkPath.startsWith(resolvedTemporaryDirectory + path.sep)) {
+        throw new BadRequestException('Invalid chunk path')
+      }
+
+      fs.writeFileSync(chunkPath, file.buffer)
+
+      return { received: dto.chunkIndex, uploadId: dto.uploadId }
+    } catch (error) {
+      this.logger.error(`Failed to save chunk ${dto.chunkIndex} for upload ${dto.uploadId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to save chunk for upload ${dto.uploadId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Merges all received chunks into a single file and processes it as a photo/video.
+   * Validates that all expected chunks are present before merging.
+   */
+  async completeChunkUpload(
+    albumId: string,
+    userId: number,
+    dto: CompleteChunkUploadDto,
+  ): Promise<object> {
+    try {
+      const album = await this.albumRepository.findOne({ where: { id: albumId } })
+      if (!album) throw new NotFoundException('Album not found')
+
+      await this.assertAlbumAccess(album, userId)
+
+      const temporaryDirectory = path.join(process.cwd(), 'uploads', 'temp', dto.uploadId)
+
+      // Validate all chunks are present
+      for (let index = 0; index < dto.totalChunks; index++) {
+        const chunkPath = path.join(temporaryDirectory, `chunk_${index}`)
+        if (!fs.existsSync(chunkPath)) {
+          throw new BadRequestException(`Missing chunk ${index} of ${dto.totalChunks}`)
+        }
+      }
+
+      const albumDirectory = path.join(process.cwd(), 'uploads', 'memories', albumId)
+      const thumbDirectory = path.join(albumDirectory, 'thumbs')
+      fs.mkdirSync(albumDirectory, { recursive: true })
+      fs.mkdirSync(thumbDirectory, { recursive: true })
+
+      const sanitized = dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const { v4: uuidv4 } = await import('uuid')
+      const filename = `${uuidv4()}_${sanitized}`
+      const finalPath = path.join(albumDirectory, filename)
+
+      // Merge chunks sequentially into final file
+      const writeStream = fs.createWriteStream(finalPath)
+      await new Promise<void>((resolve, reject) => {
+        writeStream.on('finish', resolve)
+        writeStream.on('error', reject)
+
+        const writeNextChunk = (index: number) => {
+          if (index >= dto.totalChunks) {
+            writeStream.end()
+            return
+          }
+          const chunkPath = path.join(temporaryDirectory, `chunk_${index}`)
+          const chunkBuffer = fs.readFileSync(chunkPath)
+          writeStream.write(chunkBuffer, () => writeNextChunk(index + 1))
+        }
+
+        writeNextChunk(0)
+      })
+
+      // Clean up temp directory after successful merge
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true })
+
+      const photoUrl = `/uploads/memories/${albumId}/${filename}`
+      let thumbnailUrl = photoUrl
+      let width = 0
+      let height = 0
+
+      if (dto.mimeType.startsWith('image/')) {
+        try {
+          const image = sharp(finalPath)
+          const metadata = await image.metadata()
+          width = metadata.width ?? 0
+          height = metadata.height ?? 0
+
+          const thumbFilename = `thumb_${filename.replace(/\.[^.]+$/, '')}.webp`
+          const thumbPath = path.join(thumbDirectory, thumbFilename)
+
+          await image
+            .resize(600, 600, { fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 75 })
+            .toFile(thumbPath)
+
+          thumbnailUrl = `/uploads/memories/${albumId}/thumbs/${thumbFilename}`
+        } catch {
+          this.logger.warn(`Failed to generate thumbnail for ${filename}, using original`)
+        }
+      } else if (dto.mimeType.startsWith('video/')) {
+        try {
+          const thumbFilename = `thumb_${filename.replace(/\.[^.]+$/, '')}.webp`
+          const thumbPath = path.join(thumbDirectory, thumbFilename)
+          await this.generateVideoThumbnail(finalPath, thumbPath)
+          thumbnailUrl = `/uploads/memories/${albumId}/thumbs/${thumbFilename}`
+        } catch {
+          this.logger.warn(`Failed to generate video thumbnail for ${filename}, using no thumbnail`)
+        }
+      }
+
+      const photo = this.photoRepository.create({
+        albumId,
+        url: photoUrl,
+        thumbnailUrl,
+        uploadedById: userId,
+        width,
+        height,
+        size: dto.totalSize,
+        mimeType: dto.mimeType,
+      })
+
+      const saved = await this.photoRepository.save(photo)
+
+      await this.albumRepository
+        .createQueryBuilder()
+        .update(MemoryAlbum)
+        .set({ photoCount: () => 'photo_count + 1' })
+        .where('id = :id', { id: albumId })
+        .execute()
+
+      // Kick off background transcode for videos — does not block the response
+      if (dto.mimeType.startsWith('video/')) {
+        this.transcodeVideoAsync(
+          saved.id,
+          albumId,
+          finalPath,
+          filename,
+          albumDirectory,
+          thumbDirectory,
+        )
+      }
+
+      return this.serializePhoto(saved)
+    } catch (error) {
+      this.logger.error(`Failed to complete chunk upload ${dto.uploadId}`, error)
+      this.errorLogsService.logError({
+        message: `Failed to complete chunk upload ${dto.uploadId}`,
+        stackTrace: (error as Error).stack ?? null,
+        path: 'memories',
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Re-encodes a video to H.264/AAC in an MP4 container using ffmpeg.
+   * Runs entirely in background — the photo record is already visible to clients
+   * with the original file. When done, updates url + size in DB and emits
+   * photo_transcoded socket event so clients can swap to the smaller file.
+   * The original file is deleted after a successful transcode.
+   */
+  private transcodeVideoAsync(
+    photoId: string,
+    albumId: string,
+    originalPath: string,
+    originalFilename: string,
+    albumDirectory: string,
+    thumbDirectory: string,
+  ): void {
+    // Use only the UUID portion of the filename to keep paths short (Alpine ext4 limit: 255 chars)
+    const uuidPart = originalFilename.split('_')[0]
+    const transcodedFilename = `tc_${uuidPart}.mp4`
+    // Write to a .tmp file first — only rename to final path on success.
+    // This prevents a corrupt partial file from replacing the original
+    // if ffmpeg is killed mid-encode (e.g. container restart).
+    const temporaryPath = path.join(albumDirectory, `${transcodedFilename}.tmp`)
+    const finalPath = path.join(albumDirectory, transcodedFilename)
+    const transcodedUrl = `/uploads/memories/${albumId}/${transcodedFilename}`
+
+    const ffmpegArguments = [
+      '-i',
+      originalPath,
+      '-c:v',
+      'libx264',
+      '-crf',
+      '26',
+      '-preset',
+      'faster',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      '-movflags',
+      '+faststart',
+      // Explicitly specify format so ffmpeg does not rely on the .tmp extension to detect it
+      '-f',
+      'mp4',
+      '-y',
+      temporaryPath,
+    ]
+
+    this.logger.log(`Starting video transcode for photo ${photoId} (${originalPath})`)
+    const ffmpegProcess = spawn('ffmpeg', ffmpegArguments)
+
+    // Collect stderr for logging on failure
+    const stderrChunks: Buffer[] = []
+    ffmpegProcess.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+
+    ffmpegProcess.on('close', async (code) => {
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString().slice(-500)
+        this.logger.warn(`Video transcode failed (exit ${code}) for photo ${photoId}: ${stderr}`)
+        // Remove incomplete tmp file
+        fs.unlink(temporaryPath, () => {})
+        return
+      }
+
+      try {
+        // Atomic rename: only visible to clients after full successful encode
+        fs.renameSync(temporaryPath, finalPath)
+
+        const stats = fs.statSync(finalPath)
+        const newSize = stats.size
+
+        // Generate new thumbnail from transcoded file
+        let thumbnailUrl: string | undefined
+        try {
+          const thumbFilename = `thumb_${transcodedFilename.replace(/\.[^.]+$/, '')}.webp`
+          const thumbPath = path.join(thumbDirectory, thumbFilename)
+          await this.generateVideoThumbnail(finalPath, thumbPath)
+          thumbnailUrl = `/uploads/memories/${albumId}/thumbs/${thumbFilename}`
+        } catch {
+          this.logger.warn(`Failed to re-generate thumbnail after transcode for photo ${photoId}`)
+        }
+
+        // Update DB with new url and size
+        const updateFields: Partial<MemoryPhoto> = { url: transcodedUrl, size: newSize }
+        if (thumbnailUrl) updateFields.thumbnailUrl = thumbnailUrl
+        await this.photoRepository.update({ id: photoId }, updateFields)
+
+        // Delete original upload to free disk space
+        fs.unlink(originalPath, (unlinkError) => {
+          if (unlinkError) this.logger.warn(`Could not delete original video ${originalPath}`)
+        })
+
+        // Notify connected clients so they can swap the video URL without a full reload
+        this.memoriesGateway.broadcastPhotoTranscoded(
+          albumId,
+          photoId,
+          transcodedUrl,
+          thumbnailUrl ?? transcodedUrl,
+          newSize,
+        )
+
+        this.logger.log(`Video transcode done for photo ${photoId}: ${newSize} bytes`)
+      } catch (error) {
+        this.logger.error(`Post-transcode update failed for photo ${photoId}`, error)
+      }
+    })
+
+    ffmpegProcess.on('error', (error) => {
+      this.logger.error(`ffmpeg spawn error for photo ${photoId}`, error)
+    })
+  }
+
+  /**
+   * Extracts a single frame from a video file using ffmpeg and saves it as webp.
+   * Captures at 1-second mark (or first frame if video is shorter).
+   */
+  private generateVideoThumbnail(videoPath: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const arguments_ = [
+        '-ss',
+        '00:00:01',
+        '-i',
+        videoPath,
+        '-vframes',
+        '1',
+        '-vf',
+        'scale=600:600:force_original_aspect_ratio=decrease',
+        '-f',
+        'image2',
+        '-vcodec',
+        'libwebp',
+        '-compression_level',
+        '4',
+        '-q:v',
+        '75',
+        '-y',
+        outputPath,
+      ]
+      const process = spawn('ffmpeg', arguments_)
+      process.on('close', (code: number) => {
+        if (code === 0) resolve()
+        else reject(new Error(`ffmpeg exited with code ${code}`))
+      })
+      process.on('error', reject)
+    })
+  }
+
+  /**
+   * Removes temp chunk directories older than 24 hours.
+   * Prevents stale incomplete uploads from accumulating on disk.
+   */
+  @Cron('0 * * * *')
+  cleanupExpiredTempChunks(): void {
+    const temporaryRoot = path.join(process.cwd(), 'uploads', 'temp')
+    if (!fs.existsSync(temporaryRoot)) return
+
+    const cutoff = moment().subtract(24, 'hours').valueOf()
+
+    try {
+      const entries = fs.readdirSync(temporaryRoot, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const entryPath = path.join(temporaryRoot, entry.name)
+        const stat = fs.statSync(entryPath)
+        if (stat.mtimeMs < cutoff) {
+          fs.rmSync(entryPath, { recursive: true, force: true })
+          this.logger.log(`Cleaned up stale temp upload directory: ${entry.name}`)
+        }
+      }
+    } catch (error) {
+      this.logger.error('Failed to clean up temp chunk directories', error)
     }
   }
 }

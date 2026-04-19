@@ -131,11 +131,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.roomUsers.delete(roomId)
       }
 
-      this.server.to(`room_${roomId}`).emit('user_left', {
-        roomId,
-        userId: user.userId,
-        username: user.username,
-      })
+      // Only emit user_left if the user has no other sockets in this room
+      const stillInRoom = Array.from(users.values()).some((entry) => entry.userId === user.userId)
+
+      if (!stillInRoom) {
+        this.server.to(`room_${roomId}`).emit('user_left', {
+          roomId,
+          userId: user.userId,
+          username: user.username,
+        })
+      }
 
       // Mark room as read on disconnect
       this.chatRoomService.markAsRead(roomId, user.userId).catch((error) => {
@@ -223,11 +228,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     client.leave(roomKey)
-    this.server.to(roomKey).emit('user_left', {
-      roomId,
-      userId: user.userId,
-      username: user.username,
-    })
+
+    // Only emit user_left if the user has no other sockets in this room
+    const stillInRoom = Array.from(users.values()).some((entry) => entry.userId === user.userId)
+
+    if (!stillInRoom) {
+      this.server.to(roomKey).emit('user_left', {
+        roomId,
+        userId: user.userId,
+        username: user.username,
+      })
+    }
 
     // Mark room as read when user leaves
     this.chatRoomService.markAsRead(roomId, user.userId).catch((error) => {
@@ -461,6 +472,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         messageId: payload.messageId,
         userId: user.userId,
       })
+
+      await this.pinnedMessagesService.unpin(roomId, payload.messageId).catch(() => {})
 
       this.server.to(`room_${roomId}`).emit('message_deleted', { messageId: payload.messageId })
     } catch (error) {

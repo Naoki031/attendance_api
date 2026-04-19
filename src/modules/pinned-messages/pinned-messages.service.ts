@@ -95,7 +95,7 @@ export class PinnedMessagesService {
            m.created_at AS createdAt,
            pm.created_at AS pinnedAt
          FROM pinned_messages pm
-         JOIN messages m ON m.id = pm.message_id
+         JOIN messages m ON m.id = pm.message_id AND m.is_deleted = 0
          JOIN users author ON author.id = m.user_id
          JOIN users pinner ON pinner.id = pm.pinned_by_user_id
          WHERE pm.room_id = ?

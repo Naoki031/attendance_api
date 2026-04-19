@@ -8,6 +8,7 @@ export interface ReactionGroup {
   emoji: string
   count: number
   userIds: number[]
+  userNames: string[]
 }
 
 @Injectable()
@@ -63,20 +64,23 @@ export class MessageReactionsService {
     try {
       const reactions = await this.reactionRepository.find({
         where: { message_id: messageId },
+        relations: ['user'],
       })
 
-      const grouped = new Map<string, number[]>()
+      const grouped = new Map<string, { userIds: number[]; userNames: string[] }>()
 
       for (const reaction of reactions) {
-        const existing = grouped.get(reaction.emoji) ?? []
-        existing.push(reaction.user_id)
+        const existing = grouped.get(reaction.emoji) ?? { userIds: [], userNames: [] }
+        existing.userIds.push(reaction.user_id)
+        existing.userNames.push(reaction.user?.full_name ?? `User ${reaction.user_id}`)
         grouped.set(reaction.emoji, existing)
       }
 
-      return Array.from(grouped.entries()).map(([emoji, userIds]) => ({
+      return Array.from(grouped.entries()).map(([emoji, data]) => ({
         emoji,
-        count: userIds.length,
-        userIds,
+        count: data.userIds.length,
+        userIds: data.userIds,
+        userNames: data.userNames,
       }))
     } catch (error) {
       this.logger.error('Failed to get grouped reactions by message', error)
@@ -99,10 +103,11 @@ export class MessageReactionsService {
     try {
       const reactions = await this.reactionRepository
         .createQueryBuilder('reaction')
+        .leftJoinAndSelect('reaction.user', 'user')
         .where('reaction.message_id IN (:...messageIds)', { messageIds })
         .getMany()
 
-      const byMessage = new Map<number, Map<string, number[]>>()
+      const byMessage = new Map<number, Map<string, { userIds: number[]; userNames: string[] }>>()
 
       for (const reaction of reactions) {
         if (!byMessage.has(reaction.message_id)) {
@@ -110,9 +115,10 @@ export class MessageReactionsService {
         }
 
         const emojiMap = byMessage.get(reaction.message_id)!
-        const userIds = emojiMap.get(reaction.emoji) ?? []
-        userIds.push(reaction.user_id)
-        emojiMap.set(reaction.emoji, userIds)
+        const data = emojiMap.get(reaction.emoji) ?? { userIds: [], userNames: [] }
+        data.userIds.push(reaction.user_id)
+        data.userNames.push(reaction.user?.full_name ?? `User ${reaction.user_id}`)
+        emojiMap.set(reaction.emoji, data)
       }
 
       const result = new Map<number, ReactionGroup[]>()
@@ -120,10 +126,11 @@ export class MessageReactionsService {
       for (const [messageId, emojiMap] of byMessage.entries()) {
         result.set(
           messageId,
-          Array.from(emojiMap.entries()).map(([emoji, userIds]) => ({
+          Array.from(emojiMap.entries()).map(([emoji, data]) => ({
             emoji,
-            count: userIds.length,
-            userIds,
+            count: data.userIds.length,
+            userIds: data.userIds,
+            userNames: data.userNames,
           })),
         )
       }

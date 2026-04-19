@@ -11,13 +11,14 @@ import {
   StreamableFile,
   UseGuards,
   UseInterceptors,
+  UploadedFile,
   UploadedFiles,
   HttpCode,
   HttpStatus,
   ValidationPipe,
 } from '@nestjs/common'
 import type { Response } from 'express'
-import { FilesInterceptor } from '@nestjs/platform-express'
+import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express'
 import { MemoriesService } from './memories.service'
 import { CreateAlbumDto } from './dto/create-album.dto'
 import { UpdateAlbumDto } from './dto/update-album.dto'
@@ -26,9 +27,10 @@ import { UpdateCommentDto } from './dto/update-comment.dto'
 import { ToggleReactionDto } from './dto/toggle-reaction.dto'
 import { SharePhotoDto } from './dto/share-photo.dto'
 import { ShareAlbumDto } from './dto/share-album.dto'
+import { UploadChunkDto, CompleteChunkUploadDto } from './dto/upload-chunk.dto'
 import { QueryAlbumsDto } from './dto/query-albums.dto'
 import { UpdateMembersDto } from './dto/update-members.dto'
-import { memoriesMulterConfig } from './config/multer.config'
+import { memoriesMulterConfig, chunkMulterConfig } from './config/multer.config'
 import { PermissionsGuard } from '@/modules/permissions/guards/permissions.guard'
 import { Permissions } from '@/modules/permissions/decorators/permissions.decorator'
 import { CurrentUser } from '@/modules/auth/decorators/current-user.decorator'
@@ -144,6 +146,30 @@ export class MemoriesController {
       Math.max(1, parseInt(page, 10) || 1),
       Math.min(100, parseInt(limit, 10) || 50),
     )
+    return { success: true, data }
+  }
+
+  @Post('albums/:id/photos/chunk')
+  @Permissions('all_privileges', 'create')
+  @UseInterceptors(FileInterceptor('chunk', chunkMulterConfig))
+  async uploadChunk(
+    @Param('id') albumId: string,
+    @CurrentUser() user: { id: number },
+    @UploadedFile() file: Express.Multer.File,
+    @Body(new ValidationPipe({ transform: true })) dto: UploadChunkDto,
+  ) {
+    const data = await this.memoriesService.uploadChunk(albumId, user.id, file, dto)
+    return { success: true, data }
+  }
+
+  @Post('albums/:id/photos/chunk/complete')
+  @Permissions('all_privileges', 'create')
+  async completeChunkUpload(
+    @Param('id') albumId: string,
+    @CurrentUser() user: { id: number },
+    @Body(new ValidationPipe({ transform: true })) dto: CompleteChunkUploadDto,
+  ) {
+    const data = await this.memoriesService.completeChunkUpload(albumId, user.id, dto)
     return { success: true, data }
   }
 
@@ -299,6 +325,16 @@ export class MemoriesController {
   async translateAlbumComment(@Param('id') id: string, @CurrentUser() user: { id: number }) {
     const data = await this.memoriesService.translateAlbumComment(id, user.id)
     return { success: true, data }
+  }
+
+  @Post('album-comments/:id/react')
+  @Permissions('all_privileges', 'create')
+  async toggleAlbumCommentReaction(
+    @Param('id') id: string,
+    @Body(ValidationPipe) body: { type: string },
+    @CurrentUser() user: { id: number },
+  ) {
+    return this.memoriesService.toggleAlbumCommentReaction(id, user.id, body.type)
   }
 
   @Post('share-album')

@@ -74,4 +74,26 @@ export class MemoriesGateway implements OnGatewayDisconnect {
   broadcastAlbumCommentDeleted(albumId: string, commentId: string): void {
     this.server.to(`album_${albumId}`).emit('album_comment_deleted', { albumId, commentId })
   }
+
+  broadcastAlbumCommentReactionUpdated(
+    albumId: string,
+    commentId: string,
+    reactions: Record<string, Array<{ id: number; name: string }>>,
+  ): void {
+    this.server
+      .to(`album_${albumId}`)
+      .emit('album_comment_reaction_updated', { albumId, commentId, reactions })
+  }
+
+  broadcastPhotoTranscoded(
+    albumId: string,
+    photoId: string,
+    url: string,
+    thumbnailUrl: string,
+    size: number,
+  ): void {
+    this.server
+      .to(`album_${albumId}`)
+      .emit('photo_transcoded', { albumId, photoId, url, thumbnailUrl, size })
+  }
 }
