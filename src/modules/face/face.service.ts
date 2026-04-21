@@ -3,11 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { User } from '@/modules/users/entities/user.entity'
 
-const FACE_MATCH_THRESHOLD = 0.55
+const FACE_MATCH_THRESHOLD = 0.6
 
 // If the best and second-best match are within this margin, the result is
 // ambiguous and must be rejected to prevent clocking in the wrong employee.
-const AMBIGUITY_MARGIN = 0.08
+const AMBIGUITY_MARGIN = 0.05
 
 export interface MatchResult {
   employeeId: number
@@ -46,7 +46,7 @@ export class FaceService {
 
     let bestMatch: MatchResult | null = null
     let bestDistance = FACE_MATCH_THRESHOLD
-    let secondBestDistance = FACE_MATCH_THRESHOLD
+    let secondBestDistance = Infinity
 
     for (const user of candidates) {
       if (!user.face_descriptor || user.face_descriptor.length !== 128) continue
