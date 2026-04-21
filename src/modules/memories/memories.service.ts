@@ -2265,14 +2265,24 @@ export class MemoriesService {
     const transcodedUrl = `/uploads/memories/${albumId}/${transcodedFilename}`
 
     const ffmpegArguments = [
+      // Limit all thread pools globally (demuxer, decoder, encoder, muxer, filters)
+      '-threads',
+      '1',
       '-i',
       originalPath,
       '-c:v',
       'libx264',
       '-crf',
-      '26',
+      '28',
       '-preset',
-      'faster',
+      'veryfast',
+      // Limit x264 encoder threads specifically
+      '-x264-params',
+      'threads=1',
+      '-filter_threads',
+      '1',
+      '-filter_complex_threads',
+      '1',
       '-c:a',
       'aac',
       '-b:a',
@@ -2287,7 +2297,8 @@ export class MemoriesService {
     ]
 
     this.logger.log(`Starting video transcode for photo ${photoId} (${originalPath})`)
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArguments)
+    // Run ffmpeg at lowest CPU priority (nice 19) so it never starves other processes
+    const ffmpegProcess = spawn('nice', ['-n', '19', 'ffmpeg', ...ffmpegArguments])
 
     // Collect stderr for logging on failure
     const stderrChunks: Buffer[] = []
