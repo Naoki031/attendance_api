@@ -902,22 +902,30 @@ export class AttendanceLogsService {
     requestingUserId?: number,
     requestingUserRoles?: string[],
   ): Promise<FaceCheckinResult> {
-    const matchResult = await this.faceService.matchFace(descriptor)
-    if (!matchResult) {
-      throw new BadRequestException('Face not recognized. Please register your face or try again.')
-    }
+    // 1:1 verify when caller is a known logged-in user (normal case).
+    // 1:N search only for super-admin kiosk mode where identity is unknown.
+    const isKioskMode = isSuperAdmin(requestingUserRoles) && requestingUserId === undefined
+    const matchOutcome = isKioskMode
+      ? await this.faceService.matchFace(descriptor)
+      : await this.faceService.verifyFace(requestingUserId!, descriptor)
 
-    // Only super-admin users can clock in/out other people (kiosk mode).
-    // Regular employees and non-super admins must clock themselves only.
-    if (
-      !isSuperAdmin(requestingUserRoles) &&
-      requestingUserId !== undefined &&
-      matchResult.employeeId !== requestingUserId
-    ) {
-      throw new ForbiddenException(
-        'You can only clock in/out yourself. Ask a super admin to set up a dedicated shared device.',
+    if (!matchOutcome.matched) {
+      const reason = (matchOutcome as { matched: false; reason: string }).reason
+      if (reason === 'no_descriptor') {
+        throw new BadRequestException(
+          'No approved face registered for your account. Please complete KYC face registration first.',
+        )
+      }
+      if (reason === 'ambiguous') {
+        throw new BadRequestException(
+          'Face is ambiguous between multiple employees. Please re-register your face in better lighting.',
+        )
+      }
+      throw new BadRequestException(
+        'Face not recognized. Your face may look different from when you registered — try re-registering your KYC in the same lighting conditions.',
       )
     }
+    const matchResult = matchOutcome.result
 
     const { date, time } = await this.getDateTimeForUser(matchResult.employeeId)
 
