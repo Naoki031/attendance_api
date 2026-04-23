@@ -49,6 +49,9 @@ import { MemoryComment } from '../../modules/memories/entities/memory_comment.en
 import { MemoryAlbumComment } from '../../modules/memories/entities/memory_album_comment.entity'
 import { MemoryAlbumView } from '../../modules/memories/entities/memory_album_view.entity'
 import { MemoryPhotoView } from '../../modules/memories/entities/memory_photo_view.entity'
+import { ChatbotCacheEntry } from '../../modules/chatbot/cache/entities/chatbot-cache-entry.entity'
+import { ChatbotPromptSectionHash } from '../../modules/chatbot/cache/entities/chatbot-prompt-section-hash.entity'
+import { ChatbotLog } from '../../modules/chatbot/cache/entities/chatbot-log.entity'
 import { databaseConfig } from './database.config'
 import InitSeeder from './seeds/init.seeder'
 
@@ -103,6 +106,9 @@ const options: DataSourceOptions & SeederOptions = {
     MemoryAlbumComment,
     MemoryAlbumView,
     MemoryPhotoView,
+    ChatbotCacheEntry,
+    ChatbotPromptSectionHash,
+    ChatbotLog,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',

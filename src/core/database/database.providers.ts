@@ -50,6 +50,9 @@ import { MemoryComment } from '@/modules/memories/entities/memory_comment.entity
 import { MemoryAlbumComment } from '@/modules/memories/entities/memory_album_comment.entity'
 import { MemoryAlbumView } from '@/modules/memories/entities/memory_album_view.entity'
 import { MemoryPhotoView } from '@/modules/memories/entities/memory_photo_view.entity'
+import { ChatbotCacheEntry } from '@/modules/chatbot/cache/entities/chatbot-cache-entry.entity'
+import { ChatbotPromptSectionHash } from '@/modules/chatbot/cache/entities/chatbot-prompt-section-hash.entity'
+import { ChatbotLog } from '@/modules/chatbot/cache/entities/chatbot-log.entity'
 
 export const DatabaseProvider = TypeOrmModule.forRootAsync({
   imports: [ConfigModule],
@@ -106,6 +109,9 @@ export const DatabaseProvider = TypeOrmModule.forRootAsync({
         MemoryAlbumComment,
         MemoryAlbumView,
         MemoryPhotoView,
+        ChatbotCacheEntry,
+        ChatbotPromptSectionHash,
+        ChatbotLog,
       ],
       migrationsTableName: 'migrations',
       namingStrategy: new SnakeNamingStrategy(),

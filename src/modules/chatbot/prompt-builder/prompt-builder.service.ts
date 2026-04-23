@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { PromptSection, PromptRole, DataContext } from './types'
+import { ChatbotCacheService } from '../cache/chatbot-cache.service'
 import { ErrorLogsService } from '@/modules/error_logs/error_logs.service'
 
 const TONE_INSTRUCTIONS: Record<string, string> = {
@@ -49,6 +50,7 @@ export class PromptBuilderService implements OnModuleInit {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly cacheService: ChatbotCacheService,
     private readonly errorLogsService: ErrorLogsService,
   ) {}
 
@@ -231,6 +233,17 @@ Rules:
   }
 
   /**
+   * Returns the section IDs that make up the prompt for a given role.
+   * Used by cache to track dependencies for invalidation.
+   */
+  getSectionIdsForRole(role: PromptRole): string[] {
+    return this.sections
+      .filter((section) => section.tags.includes(role))
+      .sort((sectionA, sectionB) => sectionA.order - sectionB.order)
+      .map((section) => section.id)
+  }
+
+  /**
    * Returns the number of loaded sections (for the reload endpoint).
    */
   getSectionCount(): number {
@@ -249,13 +262,20 @@ Rules:
 
   /**
    * Reloads all prompt sections from disk and reassembles.
-   * Called via admin endpoint for dev convenience.
+   * Compares section hashes to auto-invalidate cache entries affected by changes.
    */
   async reload(): Promise<void> {
     try {
       this.logger.log('Reloading prompt sections from disk...')
       await this.loadSections()
       this.assembleAll()
+
+      // Sync section hashes with DB and invalidate affected cache entries
+      const currentSections = this.sections.map((section) => ({
+        id: section.id,
+        body: section.body,
+      }))
+      await this.cacheService.syncSectionHashesAndGetChanged(currentSections)
     } catch (error) {
       this.logger.error('Failed to reload prompt sections', error)
       this.errorLogsService.logError({

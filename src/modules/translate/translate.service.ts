@@ -201,126 +201,130 @@ function applyJapaneseStyleRules(text: string, intent: MessageIntent): string {
 }
 
 /**
- * Static translation rules that never change between calls.
- * Cached by Anthropic prompt caching — reused across ALL translation requests
- * regardless of source/target language or glossary.
+ * Post-processing for Vietnamese translation output.
+ * Handles transformations that are safer to do in code than rely on prompt alone.
  */
-const STATIC_TRANSLATION_RULES = [
-  `- PRIORITY: Translate NATURALLY, not literally. Rewrite to sound like a native speaker.`,
-  `- Avoid word-for-word translation. You may restructure the sentence completely.`,
-  `- NATURALIZATION RULE: If the output sounds like a translation, rewrite it until it reads as if a native speaker wrote it from scratch. Full sentence restructuring is allowed and encouraged.`,
-  `- Tone: casual→warm/friendly, formal→professional. Never make casual stiff.`,
-  `- VI RULES:`,
-  `  • Casual: use "bạn/mình", not "tôi". "tôi" sounds stiff and distant in workplace chat.`,
-  `  • Vietnamese has no pronoun ambiguity — "bạn" works for both "you" and generic address.`,
-  `  • Natural Vietnamese connectors: "thì", "mà", "nên", "nhưng", "vì", "nếu" — use them to flow naturally.`,
-  `  • Common Vietnamese workplace phrases:`,
-  `      - "mình hiểu rồi" (I understand) — not "tôi đã hiểu"`,
-  `      - "để mình xem lại nhé" (let me check) — not "để tôi kiểm tra"`,
-  `      - "cảm ơn bạn nhé" (thanks) — not "cảm ơn bạn"`,
-  `      - "ok mình xử lý nha" (I'll handle it) — not "tôi sẽ xử lý"`,
-  `      - "bạn ơi" to get attention — very natural, never drop it`,
-  `      - "hẹn gặp lại nhé" (see you) — not "hẹn gặp lại"`,
-  `  • Vietnamese particles for warmth: "nhé", "nha", "ha", "nè" — add them naturally at sentence end.`,
-  `  • NEVER translate Japanese name suffixes (さん、くん、ちゃん) into Vietnamese — omit them.`,
-  `  • When translating FROM Vietnamese: "bạn" can mean "you" or "friend" — use context.`,
-  `  • Vietnamese does NOT distinguish formal/casual by pronoun change — warmth comes from particles and phrasing.`,
-  `- JA↔VI TRANSLATION RULES (CRITICAL):`,
-  `  • Japanese → Vietnamese: Japanese omits subjects; Vietnamese often needs them. Add "bạn/mình/anh/chị" naturally.`,
-  `  • Vietnamese → Japanese: Vietnamese "bạn" → omit subject in Japanese. NEVER → あなた.`,
-  `  • Vietnamese "nhé/nha" at sentence end → Japanese sentence-ending particle (ね/よ/よね) to match warmth.`,
-  `  • Japanese 〜ましょう / 〜ましょうか → Vietnamese "mình ... nhé" / "... không?" (inclusive suggestion).`,
-  `  • Japanese 〜てください → Vietnamese "bạn ... nhé" or "giúp mình ... nha" (soft request, not commanding).`,
-  `  • Vietnamese "cảm ơn" → Japanese context: ありがとうございます (formal) / ありがとう (casual). Match source tone.`,
-  `  • Vietnamese "xin lỗi" → Japanese: すみません (general) / ごめん (casual). Match source tone.`,
-  `  • Vietnamese questions without question words (e.g. "bạn ăn cơm chưa") → Japanese: casual 〜た？/ formal 〜ましたか？.`,
-  `  • Japanese sentence-ending ね → Vietnamese "nhỉ", "nhé" (agreement/softening).`,
-  `  • Japanese sentence-ending よ → Vietnamese emphasis "đấy", "nhé" (informing/reminder).`,
-  `  • Vietnamese "được không?" → Japanese 〜てもいい？(casual) / 〜てもいいですか？(formal).`,
-  `  • Vietnamese "phải không?" → Japanese 〜ですか？/ 〜だろうか — keep it simple, match tone.`,
-  `  • Vietnamese address: "anh/chị/em" ← DO NOT translate to Japanese kinship terms. Omit or use name.`,
-  `  • Vietnamese polite "dạ" → Japanese はい (but softer). Match formality.`,
-  `  • Vietnamese past tense "đã ... rồi" → Japanese 〜た form. Do NOT add もう unless "already" is emphasized.`,
-  `  • Vietnamese future "sẽ" → Japanese 〜つもり / 〜予定 / casual future. Do NOT over-formalize.`,
-  `- JA HARD RULES (STRICT):`,
-  `  • NEVER output "あなた" or "君" under ANY circumstance — Vietnamese "bạn/em/anh/chị" and English "you" MUST be rendered by omitting the subject entirely, not by translating to あなた/君`,
-  `      BAD: あなたはこのテーブルのことを言っていますか？`,
-  `      GOOD: このテーブルのことですか？`,
-  `  • NEVER use masculine first-person "僕" or "俺" — omit subject or use "私" only if required`,
-  `  • NEVER use kinship terms (姉さん/お兄さん etc.) for workplace address — omit or use person's name`,
-  `  • Casual source → casual Japanese output. NEVER use formal vocabulary in casual chat:`,
-  `      BAD: 非常に難しいです / 言及していますか / その通りです`,
-  `      GOOD: かなり難しいですね / そのことですか？ / そうですよ`,
-  `  • Prefer natural Japanese over literal translation`,
-  `  • Merge clauses with て/から/し instead of writing two short sentences`,
-  `  • Use soft outward tone (〜くださいね / 〜といいですね / 〜ほしいです)`,
-  `  • Replace unnatural phrases:`,
-  `      - 大切にしてください → お体に気をつけてください`,
-  `      - 支援が必要な時は / 助けが必要 → 困ったことがあれば`,
-  `      - サポートが必要なら → 気軽に声をかけてください`,
-  `      - 疲れているように見える → なんか疲れてそう / お疲れじゃない？`,
-  `      - 早く元気になってほしい / もらいたい → 早く良くなるといいね`,
-  `      - すごく心配している (casual) → 大丈夫？ + 気になってたんだけど`,
-  `- JA STYLE UPGRADE (caring tone only):`,
-  `  • You MAY add natural nuance: 気軽に / といいですね / どうか`,
-  `  • NEVER use もらいたいです for recovery or health wishes — it frames the speaker's desire, not the other person's wellbeing`,
-  `  • NEVER use ぜひ with negative requests (〜ないでね / 〜ないでください) — ぜひ is for positive requests only`,
-  `  • Add nuance only where it flows naturally — do NOT overuse`,
-  `- BAD example (DO NOT DO):`,
-  `  • あなたもお体に気をつけてください`,
-  `  • 疲れているように見えるよ。ゆっくり休んでね。 (literal + segmented)`,
-  `  • 早く元気になってもらいたいです。 (speaker-centric framing)`,
-  `  • Vietnamese: "Tôi cảm ơn bạn." (stiff) → should be: "Cảm ơn bạn nhé."`,
-  `  • Vietnamese: "Tôi đã hiểu." (stiff) → should be: "Mình hiểu rồi."`,
-  `  • Vietnamese: "Xin lỗi vì sự bất tiện." (overly formal for chat) → should be: "Xin lỗi bạn nhé."`,
-  `- GOOD example:`,
-  `  • ちょっとお疲れみたいだし、無理せずゆっくり休んでね。`,
-  `  • 困ったことがあれば気軽に声をかけてね。早く良くなるといいね🙏`,
-  `  • Vietnamese: "Mình đang bận một chút, xong mình phản hồi bạn sau nhé."`,
-  `  • Vietnamese: "Bạn ơi, cái này mình chưa rõ lắm, giải thích thêm được không?"`,
-  `  • Vietnamese: "Cảm ơn bạn nhiều nha, nhờ vậy mà xong sớm."`,
-  `  • JA→VI: 今日は寒いね → "Hôm nay lạnh nhỉ." (not "Hôm nay trời lạnh.")`,
-  `  • JA→VI: 会議は3時からだよ → "Họp lúc 3 giờ đó." (not "Cuộc họp bắt đầu từ lúc 3 giờ.")`,
-  `  • VI→JA: Mình hơi mệt hôm nay → "今日ちょっと疲れてて..." (not "私は今日少し疲れています。")`,
-  `  • VI→JA: Bạn gửi mình file đó nhé → "そのファイル送ってくれる？" (not "あなたは私にそのファイルを送ってください。")`,
-  `- Avoid unnatural Japanese:`,
-  `  • 大切にしてください (for health context)`,
-  `  • 疲れているように見える (for "you look tired" context)`,
-  `  • もらいたいです for recovery/health wishing`,
-  `- Avoid unnatural Vietnamese:`,
-  `  • "Tôi" in casual chat — always use "mình" (self) or "bạn" (other)`,
-  `  • "Xin vui lòng" — overly formal, use "nhé" or "nha" instead`,
-  `  • "Chúng ta" — too formal for chat, use "mình" or just imply "we"`,
-  `  • "Do đó" / "Vì vậy" — stiff connectors, use "nên" or "thế nên"`,
-  `  • "Tôi đồng ý" — too stiff, use "Mình đồng ý nha" or "Đúng rồi"`,
-  `  • "Bạn có thể... không?" — somewhat stiff, prefer "... được không?" or "... nha"`,
-  `- JA fixed phrases: よろしくお願いします="Thanks in advance"; かしこまりました="Certainly"; お疲れ様です="Good work"`,
-  `- VI fixed phrases: "vâng" (yes, polite to elders); "dạ" (yes, soft/polite); "không sao đâu" (no worries); "không có gì" (you're welcome)`,
-  `- Keep as-is: ${IT_TERMS_PRESERVED}; ${ATTENDANCE_TERMS_PRESERVED}`,
-  `- Profanity → replace with [***], do not translate vulgarity`,
-  `- Keep ALL emojis exactly as-is — do NOT remove, replace, or convert them:`,
-  `  • Unicode emoji (🙏😅🎉) → keep exactly`,
-  `  • Custom emoji codes (:blob-sob: :yoyo-haha: :any-word:) → keep EXACTLY including the colons — NEVER convert to Unicode`,
-  `- Script purity: output language must use ONLY that script — never mix scripts (e.g., no Japanese/Chinese characters inside Vietnamese or English output). If a term cannot be translated, use the closest equivalent or romanize it — NEVER keep original script characters.`,
-  `- Keep markdown: @mentions, links, code`,
-  `- Do NOT translate proper nouns, URLs, ticket IDs`,
-  `- Translate ONLY what is in the source — do NOT add phrases, sentences, or emoji not present in the original`,
-  `- FINAL SELF-CHECK (MANDATORY before output):`,
-  `  • Does this sound like a native speaker wrote it?`,
-  `  • Is there any "translated feeling"? → rewrite if yes`,
-  `  • Are short clauses merged into one natural sentence instead of two flat ones?`,
-  `  • Is the emotional weight appropriate? (workplace casual = light, not dramatic)`,
-  `  • Ensure NO "あなた" or "君" exists — if found, rewrite with implicit subject`,
-  `  • For Vietnamese: NO "tôi" in casual chat, NO "xin vui lòng", NO stiff connectors`,
-  `  • For Japanese: NO あなた/君, check tone matches source formality`,
-  `  • If any check fails → rewrite before returning`,
-  `- TRANSLATION QUALITY STANDARDS:`,
-  `  • Accuracy: preserve meaning, intent, and emotional tone exactly`,
-  `  • Fluency: output must read as natural native speech, not a translation`,
-  `  • Consistency: same terms translated the same way throughout the conversation`,
-  `  • Register: match the formality level and social register of the source message`,
-  `  • Completeness: never omit or add content — translate exactly what is present`,
-  `  • Context awareness: use surrounding context to resolve ambiguous words`,
+function applyVietnameseStyleRules(text: string): string {
+  const result = text
+    // Strip leftover Japanese name suffixes (prompt says omit, but LLM sometimes ignores)
+    .replace(/[ぁ-んァ-ヶ]さん/g, '')
+    .replace(/[ぁ-んァ-ヶ]くん/g, '')
+    .replace(/[ぁ-んァ-ヶ]ちゃん/g, '')
+    // Replace stiff "tôi" at sentence start with "mình"
+    .replace(/(?:^|[.!?。！？]\s*)Tôi /gm, '$1Mình ')
+    .replace(/(?:^|[.!?。！？]\s*)tôi /gm, '$1mình ')
+    // Replace overly formal phrase
+    .replace(/\bxin vui lòng\b/gi, 'nhé')
+
+  return result.replace(/\s{2,}/g, ' ').trim()
+}
+
+// Core rules — always included. Compact for no-cache mode (~1,200 tokens).
+const CORE_TRANSLATION_RULES = [
+  `Translate naturally — output must read as if a native speaker wrote it from scratch. Restructure sentences freely. Match source formality: casual stays warm/friendly, never stiff.`,
+  ``,
+  `MIXED-LANGUAGE RULES (CRITICAL):`,
+  `Workplace messages often mix languages in one sentence. Example: Vietnamese with Japanese embedded, or vice versa.`,
+  `- Treat the ENTIRE message as one unified thought — translate ALL parts into the target language, including embedded foreign segments.`,
+  `- NEVER leave a portion untranslated just because it was already in the target language.`,
+  `  BAD: source="Bug này fix rồi、確認お願いします" → JA="Bug này fix ようにしたよ、確認お願いします" (Vietnamese left as-is)`,
+  `  GOOD: source="Bug này fix rồi、確認お願いします" → JA="このバグは修正したよ、確認してね"`,
+  `  GOOD: source="Bug này fix rồi、確認お願いします" → EN="The bug is fixed now, please check it"`,
+  `  GOOD: source="確認ありがとうございます、mình nhận được rồi" → JA="確認ありがとうございます、受け取りました"`,
+  ``,
+  `VI RULES:`,
+  `- Use bạn/mình, NOT tôi (stiff/distant). Particles: nhé nha ha nè for warmth. Connectors: thì mà nên nhưng vì nếu.`,
+  `- Natural phrases (NOT the stiff alternatives):`,
+  `  "mình hiểu rồi" (not "tôi đã hiểu") | "để mình xem lại nhé" (not "để tôi kiểm tra")`,
+  `  "cảm ơn bạn nhé" (not "cảm ơn bạn") | "ok mình xử lý nha" (not "tôi sẽ xử lý")`,
+  `  "bạn ơi" for attention — never drop it | "hẹn gặp lại nhé" (not "hẹn gặp lại")`,
+  `- Avoid in casual chat: tôi → mình/bạn. "xin vui lòng" → nhé/nha. "chúng ta" → mình. "do đó/vì vậy" → nên/thế nên. "tôi đồng ý" → mình đồng ý nha/đúng rồi. "bạn có thể...không?" → "...được không?"/"...nha".`,
+  `- "bạn" = both "you" and "friend" — use context. Warmth from particles, not pronoun changes. Never translate さん/くん/ちゃん into Vietnamese — omit.`,
+  ``,
+  `JA↔VI RULES:`,
+  `- JA→VI: add subject (bạn/mình/anh/chị) where Japanese omits. ね→nhỉ/nhé. よ→đấy/nhé. 〜ましょう/ましょうか→"mình...nhé"/"...không?". 〜てください→"bạn...nhé"/"giúp mình...nha".`,
+  `- VI→JA: omit subject entirely (NEVER あなた/君). nhé/nha→ね/よ/よね. "cảm ơn"→ありがとうございます(formal)/ありがとう(casual). "xin lỗi"→すみません/ごめん. "đã...rồi"→〜た. "sẽ"→〜つもり/〜予定. "dạ"→soft はい. anh/chị/em→omit or name, never kinship. "được không?"→〜てもいい？. "phải không?"→〜ですか？. "bạn ăn cơm chưa"→casual 〜た？.`,
+  ``,
+  `JA STRICT RULES:`,
+  `- NEVER あなた or 君 — render "you" by omitting subject: このテーブルのことですか？ (not あなたはこのテーブルのことを言っていますか？)`,
+  `- NEVER 僙/俺. NEVER kinship terms (姉さん/お兄さん) for workplace.`,
+  `- Casual source→casual output: 非常に難しい→かなり難しい. 言及していますか→そのことですか？. その通り→そうですよ.`,
+  `- Merge clauses with て/から/し. Soft tone: 〜くださいね/〜といいですね/〜ほしいです.`,
+  `- Replace: 大切にしてください→お体に気をつけて. 支援が必要/助けが必要→困ったことがあれば. 疲れているように見える→なんか疲れてそう. 早く元気になってほしい→早く良くなるといいね. すごく心配している→大丈夫？気になってたんだけど.`,
+  `- Caring: add 気軽に/といいですね/どうか naturally. NEVER もらいたいです for health wishes. NEVER ぜひ with negative requests. Do not overuse.`,
+  ``,
+  `BAD: あなたもお体に気をつけてください | 疲れているように見えるよ。ゆっくり休んでね。(literal+segmented) | 早く元気になってもらいたいです。(speaker-centric) | "Tôi cảm ơn bạn." | "Tôi đã hiểu." | "Xin lỗi vì sự bất tiện."`,
+  `GOOD: ちょっとお疲れみたいだし、無理せずゆっくり休んでね。 | 困ったことがあれば気軽に声をかけてね。早く良くなるといいね🙏 | "Mình đang bận một chút, xong mình phản hồi bạn sau nhé." | "Bạn ơi, cái này mình chưa rõ, giải thích thêm được không?" | "Cảm ơn bạn nhiều nha, nhờ vậy mà xong sớm."`,
+  `JA→VI: 今日は寒いね→"Hôm nay lạnh nhỉ." | 会議は3時からだよ→"Họp lúc 3 giờ đó."`,
+  `VI→JA: Mình hơi mệt hôm nay→"今日ちょっと疲れてて..." | Bạn gửi mình file đó nhé→"そのファイル送ってくれる？"`,
+  ``,
+  `FIXED: よろしくお願いします="Thanks in advance". かしこまりました="Certainly". お疲れ様です="Good work". vâng=polite yes. dạ=soft yes. không sao đâu=no worries. không có gì=you're welcome.`,
+  `PRESERVE: ${IT_TERMS_PRESERVED}; ${ATTENDANCE_TERMS_PRESERVED}.`,
+  `FORMAT: Profanity→[***]. Keep ALL emojis (Unicode + :custom-codes:). Keep @mentions/links/code. No proper nouns/URLs/ticket IDs. No adding/removing content.`,
+  `SELF-CHECK before output: 1) Read your translation aloud — does it sound like something a real person would say in a workplace chat? If it feels robotic or textbook-like, rewrite. 2) Are short choppy clauses merged into one flowing sentence? 3) No あなた/君? No tôi in VI? 4) Was any embedded foreign text left untranslated? If fail→rewrite.`,
+].join('\n')
+
+// Extra examples — only included when cache is enabled to pad prompt above Haiku's 2048-token threshold.
+// These examples improve translation quality AND enable prompt caching cost savings (~87%).
+const CACHE_PADDING_EXAMPLES = [
+  ``,
+  `WORKPLACE EXAMPLES (use these as reference for tone and naturalness):`,
+  `VI→JA:`,
+  `  "Hôm nay WFH nhé" → "今日はWFHだよ"`,
+  `  "PR này bạn review giúp mình nha" → "このPRレビューお願いできる？"`,
+  `  "Deploy xong rồi、確認してね" → "デプロイ完了したよ、確認してね"`,
+  `  "Mình nghỉ phép tuần sau" → "来週お休みいただきます"`,
+  `  "Bug production đã fix rồi nhé" → "本番のバグは修正したよ"`,
+  `  "Bạn ơi, meeting 3 giờ chuyển sang 4 giờ được không?" → "ミーティング3時から4時に変更してもいい？"`,
+  `JA→VI:`,
+  `  "お疲れ様です、確認しました" → "Cảm ơn bạn nhé, mình kiểm tra rồi"`,
+  `  "明日リモートでお願いします" → "Mình làm remote mai nhé"`,
+  `  "レビューお願いできますか？" → "Bạn review giúp mình được không?"`,
+  `  "修正しました、再度確認お願いします" → "Mình sửa xong rồi, bạn check lại giúp mình nha"`,
+  `  "会議は3時に変更になりました" → "Họp dời sang 3 giờ rồi nhé"`,
+  `  "お疲れ様でした！" → "Làm tốt lắm nhé!" / "Cảm ơn bạn nha!"`,
+  `  "少し体調が悪いので今日はお休みします" → "Hôm nay mình hơi mệt nên nghỉ nhé"`,
+  `  "この件について教えていただけますか？" → "Chuyện này bạn giải thích thêm cho mình được không?"`,
+  `  "月曜日の会議に出られません" → "Thứ hai mình không họp được nhé"`,
+  `JA→EN:`,
+  `  "お疲れ様です、確認しました" → "Thanks, I've checked it"`,
+  `  "明日リモートでお願いします" → "I'll be working remote tomorrow"`,
+  `  "レビューお願いできますか？" → "Could you review this?"`,
+  `  "デプロイ完了しました" → "Deploy is done"`,
+  `  "少し体調が悪いので今日はお休みします" → "Not feeling well today, taking a day off"`,
+  `  "このバグは本番環境で発生しています" → "This bug is happening in production"`,
+  `  "ステージング環境でテストお願いします" → "Please test on staging"`,
+  `VI→EN:`,
+  `  "Mình gửi mail rồi nhé" → "Just sent the email"`,
+  `  "Bạn check giúp mình cái này" → "Can you check this for me?"`,
+  `  "Hôm nay mình WFH" → "I'm working from home today"`,
+  `  "Bug này khó quá, bạn xem giúp nha" → "This bug is tricky, can you take a look?"`,
+  `  "Xong rồi nhé" → "All done!"`,
+  `  "Mình đi ăn trưa nhé" → "Heading to lunch, brb"`,
+  `EN→VI:`,
+  `  "Can you review my PR?" → "Bạn review PR giúp mình nha"`,
+  `  "The deploy failed" → "Deploy lỗi rồi bạn ơi"`,
+  `  "Let me check and get back to you" → "Để mình kiểm tra rồi phản hồi bạn sau nhé"`,
+  `  "I'll be off tomorrow" → "Mình nghỉ mai nhé"`,
+  `  "Nice work!" → "Làm tốt lắm nha!"`,
+  `EN→JA:`,
+  `  "Can you review my PR?" → "PRレビューお願いできる？"`,
+  `  "The deploy failed" → "デプロイ失敗したよ"`,
+  `  "Let me check and get back to you" → "確認してからまた連絡するね"`,
+  `  "I'll be off tomorrow" → "明日お休みいただきます"`,
+  `  "Nice work!" → "お疲れ様！"`,
+  `  "Running late, be there in 10" → "ちょっと遅れてる、10分後に行くね"`,
+  ``,
+  `IT TERMINOLOGY (preserve these as-is in all languages, do NOT translate to local equivalents):`,
+  `API endpoint, PR (pull request), commit, merge, branch, staging, production, database, server, cache, debug, Docker, CI/CD, dashboard, WFH, overtime.`,
+  `When translating around these terms, keep them embedded naturally:`,
+  `  "PR này merge chưa?" → "Did you merge this PR?" / "このPRマージした？"`,
+  `  "Server down rồi" → "サーバー落ちたよ" / "Server is down"`,
+  `  "Cache cleared rồi nhé" → "キャッシュクリアしたよ" / "Cache is cleared"`,
+  `  "Staging OK rồi、本番deployしよう" → "Staging looks good, let's deploy to production"`,
+  `  "Bug này repro được ở staging" → "This bug is reproducible on staging" / "このバグはstagingで再現できるよ"`,
+  `VI IT slang → keep context: "lỗi" can mean bug/error/crash. "test thử" = try testing. "xong rồi" = done. "deploy cái này" = deploy this. "fix bug" = fix the bug. "check log" = check the logs. "restart lại" = restart it.`,
+  `JA IT context: "本番" = production. "検証環境" = staging. "マージ" = merge. "リリース" = release. "障害" = incident/outage.`,
 ].join('\n')
 
 /**
@@ -334,24 +338,36 @@ function buildTranslationSystemBlocks(
   outputInstruction: string,
   glossarySection: string,
   cachePrompt: boolean,
-): Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> {
+  intent?: MessageIntent,
+): Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' } }> {
   const dynamicLines = [
-    `Workplace chat translator. Messages mix work and casual conversation. Translate from ${sourceLang} to ${targetDescription}.`,
+    `Workplace chat translator. Translate from ${sourceLang} to ${targetDescription}.`,
+    intent && intent !== 'neutral' ? `Message intent: ${intent}. Adjust warmth accordingly.` : '',
     glossarySection,
-    `- Return format strictly: ${outputInstruction}`,
+    `- Return format: ${outputInstruction}`,
   ]
     .filter(Boolean)
     .join('\n')
 
+  // When cache enabled: use core + padding to exceed Haiku's 2048-token cache threshold.
+  // When cache disabled: use core only — compact prompt saves tokens.
+  const staticText = cachePrompt
+    ? CORE_TRANSLATION_RULES + CACHE_PADDING_EXAMPLES
+    : CORE_TRANSLATION_RULES
+
+  // Two-tier caching: 1h on static rules (never change), 5m on dynamic block (per-request).
+  // Anthropic requires longer TTL blocks before shorter ones.
+  // This keeps the static prefix cached for long conversations while dynamic context refreshes naturally.
   return [
     {
       type: 'text',
-      text: STATIC_TRANSLATION_RULES,
-      ...(cachePrompt ? { cache_control: { type: 'ephemeral' } } : {}),
+      text: staticText,
+      ...(cachePrompt ? { cache_control: { type: 'ephemeral', ttl: '1h' as const } } : {}),
     },
     {
       type: 'text',
       text: dynamicLines,
+      ...(cachePrompt ? { cache_control: { type: 'ephemeral' } } : {}),
     },
   ]
 }
@@ -480,12 +496,14 @@ export class TranslateService {
         ? `- Glossary (translate consistently): ${glossaryTerms.join(', ')}`
         : ''
 
+    const intent = detectIntent(text)
     const systemBlocks = buildTranslationSystemBlocks(
       sourceLang,
       `ALL of: ${targetLangs.join(', ')}`,
-      `- Return JSON {"lang":"translation",...}. ONLY JSON, no markdown, no explanation.`,
+      `Return JSON {"lang":"translation",...}. ONLY JSON, no markdown, no explanation.`,
       glossarySection,
       this.cachePrompt,
+      intent,
     )
 
     // Cap max_tokens dynamically — output is bounded by input size (2 langs ≈ 3× input chars)
@@ -600,12 +618,14 @@ export class TranslateService {
         ? `- Glossary (translate consistently): ${glossaryTerms.join(', ')}`
         : ''
 
+    const intent = detectIntent(text)
     const systemBlocks = buildTranslationSystemBlocks(
       sourceLang,
       targetLang,
-      `- Return ONLY the translated text, no explanation, no markdown wrapper, no quotes.`,
+      `Return ONLY the translated text, no explanation, no markdown wrapper, no quotes.`,
       glossarySection,
       this.cachePrompt,
+      intent,
     )
 
     const dynamicMaxTokens = Math.min(this.maxTokens, Math.ceil(truncated.length * 1.5) + 200)
@@ -722,7 +742,11 @@ export class TranslateService {
     model: string,
     text: string,
     targetLang: string,
-    systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>,
+    systemBlocks: Array<{
+      type: 'text'
+      text: string
+      cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' }
+    }>,
     onChunk?: (chunk: string) => void,
     maxTokens?: number,
     logContext?: { messageId?: number; sourceLang: string; targetLangs: string[] },
@@ -739,7 +763,8 @@ export class TranslateService {
       messages: [{ role: 'user' as const, content: `<text>${text}</text>` }],
     }
     const isJapaneseTarget = targetLang.includes('ja')
-    const intent = isJapaneseTarget ? detectIntent(text) : 'neutral'
+    const isVietnameseTarget = targetLang.includes('vi')
+    const intent = isJapaneseTarget || isVietnameseTarget ? detectIntent(text) : 'neutral'
 
     this.logger.log(
       `translateToSingle — target=${targetLang} intent=${intent} mode=${useStreaming ? 'stream' : 'sync'}`,
@@ -777,9 +802,13 @@ export class TranslateService {
             error: undefined,
           })
 
-          return streamResult && isJapaneseTarget
-            ? applyJapaneseStyleRules(streamResult, intent)
-            : streamResult
+          if (streamResult && isJapaneseTarget) {
+            return applyJapaneseStyleRules(streamResult, intent)
+          }
+          if (streamResult && isVietnameseTarget) {
+            return applyVietnameseStyleRules(streamResult)
+          }
+          return streamResult
         } else {
           const response = await this.client.messages.create(requestPayload, { timeout: 60_000 })
 
@@ -802,9 +831,13 @@ export class TranslateService {
             error: undefined,
           })
 
-          return rawResult && isJapaneseTarget
-            ? applyJapaneseStyleRules(rawResult, intent)
-            : rawResult
+          if (rawResult && isJapaneseTarget) {
+            return applyJapaneseStyleRules(rawResult, intent)
+          }
+          if (rawResult && isVietnameseTarget) {
+            return applyVietnameseStyleRules(rawResult)
+          }
+          return rawResult
         }
       } catch (error) {
         const status = (error as { status?: number }).status
@@ -932,6 +965,8 @@ export class TranslateService {
    * - Single character repeated ≥ 4 times ("aaaa", "....", "!!!!")
    * - Repeating 2–4 char pattern ≥ 3 cycles ("hahaha", "hehehe", "lololo", "xoxo")
    * - Single unique word repeated ≥ 4 times ("ok ok ok ok ok", "ha ha ha ha")
+   * - Keyboard mash / random gibberish (low unique-char ratio)
+   * - No-vowel no-CJK noise (random consonant/digit strings)
    */
   private isSpamContent(text: string): boolean {
     const lower = text.trim().toLowerCase()
@@ -987,6 +1022,16 @@ export class TranslateService {
     // Single unique word repeated ≥ 4 times: "ok ok ok ok", "ha ha ha ha"
     const words = lower.trim().split(/\s+/)
     if (words.length >= 4 && new Set(words).size === 1) return true
+
+    // Keyboard mash / gibberish: very few unique characters relative to total length
+    const uniqueChars = new Set(noSpaces).size
+    if (noSpaces.length > 10 && uniqueChars / noSpaces.length < 0.25) return true
+
+    // Random consonant/digit strings with no vowels and no CJK characters
+    const vowelRegex = /[aeiouyàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]/u
+    const hasVowels = vowelRegex.test(noSpaces)
+    const hasCJK = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(noSpaces)
+    if (!hasVowels && !hasCJK && noSpaces.length > 8) return true
 
     return false
   }

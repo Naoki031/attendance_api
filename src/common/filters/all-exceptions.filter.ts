@@ -60,16 +60,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = String(exception)
     }
 
-    // Persist all errors to DB: 4xx (client errors) as 'warn', 5xx (server errors) as 'error'.
-    const level = statusCode >= 500 ? 'error' : 'warn'
-    this.persistErrorLog({
-      level,
-      message,
-      statusCode,
-      stackTrace: exception instanceof Error ? (exception.stack ?? null) : null,
-      request,
-      user: (request as unknown as Record<string, unknown>).user as Record<string, unknown> | null,
-    })
+    // Persist errors to DB: skip 404 (route not found) to avoid noise.
+    // 4xx (client errors) as 'warn', 5xx (server errors) as 'error'.
+    if (statusCode !== 404) {
+      const level = statusCode >= 500 ? 'error' : 'warn'
+      this.persistErrorLog({
+        level,
+        message,
+        statusCode,
+        stackTrace: exception instanceof Error ? (exception.stack ?? null) : null,
+        request,
+        user: (request as unknown as Record<string, unknown>).user as Record<
+          string,
+          unknown
+        > | null,
+      })
+    }
 
     // Log to console for Docker visibility (all status codes)
     const truncatedMessage =
