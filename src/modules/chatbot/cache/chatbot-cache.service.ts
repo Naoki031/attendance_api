@@ -130,8 +130,8 @@ export class ChatbotCacheService {
           tone,
           language: language ?? null,
           reply,
-          suggestions: JSON.stringify(suggestions),
-          sectionIds: JSON.stringify(sectionIds),
+          suggestions,
+          sectionIds,
           modelUsed,
           expiresAt,
         })
